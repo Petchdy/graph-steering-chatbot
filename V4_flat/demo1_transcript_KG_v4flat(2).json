@@ -1,0 +1,595 @@
+{
+  "meta": {
+    "schema_version": "ontology_v4_flat",
+    "transcript": "demo1_transcript.json",
+    "session_type": "therapy",
+    "n_turns": 45,
+    "speaker_enum": [
+      "therapist",
+      "client"
+    ],
+    "generated_by": "cbt v4 pipeline"
+  },
+  "tbox_nodes": [
+    {
+      "id": "tbox_OWL_Thing",
+      "label": "TBox",
+      "name": "OWL_Thing"
+    },
+    {
+      "id": "tbox_Provenance",
+      "label": "TBox",
+      "name": "Provenance"
+    },
+    {
+      "id": "tbox_Utterance",
+      "label": "TBox",
+      "name": "Utterance"
+    },
+    {
+      "id": "tbox_SessionStructure",
+      "label": "TBox",
+      "name": "SessionStructure"
+    },
+    {
+      "id": "tbox_Session",
+      "label": "TBox",
+      "name": "Session"
+    },
+    {
+      "id": "tbox_Client",
+      "label": "TBox",
+      "name": "Client"
+    },
+    {
+      "id": "tbox_Problem",
+      "label": "TBox",
+      "name": "Problem"
+    },
+    {
+      "id": "tbox_Goal",
+      "label": "TBox",
+      "name": "Goal"
+    },
+    {
+      "id": "tbox_Intervention",
+      "label": "TBox",
+      "name": "Intervention"
+    },
+    {
+      "id": "tbox_Homework",
+      "label": "TBox",
+      "name": "Homework"
+    },
+    {
+      "id": "tbox_CognitiveModel",
+      "label": "TBox",
+      "name": "CognitiveModel"
+    },
+    {
+      "id": "tbox_CoreBelief",
+      "label": "TBox",
+      "name": "CoreBelief"
+    },
+    {
+      "id": "tbox_IntermediateBelief",
+      "label": "TBox",
+      "name": "IntermediateBelief"
+    },
+    {
+      "id": "tbox_Situation",
+      "label": "TBox",
+      "name": "Situation"
+    },
+    {
+      "id": "tbox_AutomaticThought",
+      "label": "TBox",
+      "name": "AutomaticThought"
+    },
+    {
+      "id": "tbox_Reaction",
+      "label": "TBox",
+      "name": "Reaction"
+    },
+    {
+      "id": "tbox_AdaptiveResponse",
+      "label": "TBox",
+      "name": "AdaptiveResponse"
+    }
+  ],
+  "tbox_edges": [
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Provenance",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Utterance",
+      "to": "tbox_Provenance"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_SessionStructure",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Session",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Client",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Problem",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Goal",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Intervention",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Homework",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_CognitiveModel",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_CoreBelief",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_IntermediateBelief",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Situation",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_AutomaticThought",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Reaction",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_AdaptiveResponse",
+      "to": "tbox_CognitiveModel"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "client_1",
+      "label": "Client",
+      "parent": null,
+      "properties": {},
+      "evidence": []
+    },
+    {
+      "id": "session_1",
+      "label": "Session",
+      "parent": null,
+      "properties": {
+        "sessionType": "therapy"
+      },
+      "evidence": []
+    },
+    {
+      "id": "at_1",
+      "label": "AutomaticThought",
+      "parent": null,
+      "properties": {
+        "content": "I will never find somebody who loves me.",
+        "distortionType": "fortuneTelling",
+        "modality": "verbal"
+      },
+      "evidence": [
+        1
+      ]
+    },
+    {
+      "id": "at_2",
+      "label": "AutomaticThought",
+      "parent": null,
+      "properties": {
+        "content": "People don't want to be with me.",
+        "distortionType": "mindReading",
+        "modality": "verbal"
+      },
+      "evidence": [
+        5
+      ]
+    },
+    {
+      "id": "at_3",
+      "label": "AutomaticThought",
+      "parent": null,
+      "properties": {
+        "content": "If I were truly worthless, I would need to date people who couldn't see it or wouldn't know about it.",
+        "distortionType": "none",
+        "modality": "verbal"
+      },
+      "evidence": [
+        17
+      ]
+    },
+    {
+      "id": "cb_1",
+      "label": "CoreBelief",
+      "parent": null,
+      "properties": {
+        "content": "I am truly worthless.",
+        "domain": "self",
+        "category": "worthless"
+      },
+      "evidence": [
+        11,
+        12,
+        17
+      ]
+    },
+    {
+      "id": "cb_2",
+      "label": "CoreBelief",
+      "parent": null,
+      "properties": {
+        "content": "People will say I am unlovable.",
+        "domain": "others"
+      },
+      "evidence": [
+        12,
+        17
+      ]
+    },
+    {
+      "id": "cb_3",
+      "label": "CoreBelief",
+      "parent": null,
+      "properties": {
+        "content": "I must hide my worthlessness from others who are too smart to see it.",
+        "domain": "world"
+      },
+      "evidence": [
+        12,
+        17
+      ]
+    },
+    {
+      "id": "hw_1",
+      "label": "Homework",
+      "parent": null,
+      "properties": {
+        "taskDescription": "set like a specific date and time that you're going to do this in the next seven days",
+        "taskType": "behavioralExperiment",
+        "isOptional": false
+      },
+      "evidence": [
+        24
+      ]
+    },
+    {
+      "id": "ib_1",
+      "label": "IntermediateBelief",
+      "parent": null,
+      "properties": {
+        "content": "I constantly make sure the other person is happy in all interactions (professional, friendship, romantic, familial) because I want them to be happy about interacting with me and do not want them to have an interaction where they are unhappy.",
+        "subtype": "rule"
+      },
+      "evidence": [
+        19
+      ]
+    },
+    {
+      "id": "ib_2",
+      "label": "IntermediateBelief",
+      "parent": null,
+      "properties": {
+        "content": "I must only date people who are below my league or unaware of my worthlessness, otherwise I will be exposed as defective and rejected.",
+        "subtype": "assumption"
+      },
+      "evidence": [
+        15,
+        17
+      ]
+    },
+    {
+      "id": "ib_3",
+      "label": "IntermediateBelief",
+      "parent": null,
+      "properties": {
+        "content": "If I truly am worthless, I must date people who are below my league so they cannot see or judge me for being unworthy.",
+        "subtype": "assumption"
+      },
+      "evidence": [
+        15,
+        17
+      ]
+    },
+    {
+      "id": "ib_4",
+      "label": "IntermediateBelief",
+      "parent": null,
+      "properties": {
+        "content": "If I truly am worthless, I must over-compensate by showing off external markers like my house, job, friends, or happiness so others cannot see that I am worthless.",
+        "subtype": "attitude"
+      },
+      "evidence": [
+        17
+      ]
+    },
+    {
+      "id": "intv_1",
+      "label": "Intervention",
+      "parent": null,
+      "properties": {
+        "description": "laddering technique where any negative thought you have i ask you what does that mean if that thought was true",
+        "technique": "realityTesting"
+      },
+      "evidence": [
+        12
+      ]
+    },
+    {
+      "id": "intv_2",
+      "label": "Intervention",
+      "parent": null,
+      "properties": {
+        "description": "this experiment is going to be very time limited it's going to be very specific so i need you to set like a specific date and time that you're going to do this in the next seven days oh okay yeah it was going to be real specific because we need to get that data and it's going to be something that's kind of uh contained meaning it should be something where it's not like a free-for-all",
+        "technique": "behaviorExperiment"
+      },
+      "evidence": [
+        24
+      ]
+    },
+    {
+      "id": "intv_3",
+      "label": "Intervention",
+      "parent": null,
+      "properties": {
+        "description": "this is literally going to be you going to him to express a need of yours to express a problem have this person give you the advice and then be like thank you that was super helpful talk to you later so that's the experiment",
+        "technique": "behaviorExperiment"
+      },
+      "evidence": [
+        24
+      ]
+    },
+    {
+      "id": "prob_1",
+      "label": "Problem",
+      "parent": null,
+      "properties": {
+        "description": "fear of being alone / unlovable leading to self-worth issues",
+        "domain": "social"
+      },
+      "evidence": [
+        1,
+        3,
+        7
+      ]
+    },
+    {
+      "id": "prob_2",
+      "label": "Problem",
+      "parent": null,
+      "properties": {
+        "description": "'i always have to take care of other people's needs first'",
+        "domain": "social"
+      },
+      "evidence": [
+        19,
+        20
+      ]
+    },
+    {
+      "id": "react_1",
+      "label": "Reaction",
+      "parent": null,
+      "properties": {
+        "content": "it's an awful thought",
+        "channel": "emotional"
+      },
+      "evidence": [
+        5
+      ]
+    },
+    {
+      "id": "sit_1",
+      "label": "Situation",
+      "parent": null,
+      "properties": {
+        "description": "recently broke up with a long long-term partner",
+        "kind": "externalSituation"
+      },
+      "evidence": [
+        1
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "type": "hasSession",
+      "from": "client_1",
+      "to": "session_1",
+      "evidence": []
+    },
+    {
+      "type": "hasProblem",
+      "from": "session_1",
+      "to": "prob_1",
+      "evidence": []
+    },
+    {
+      "type": "hasProblem",
+      "from": "session_1",
+      "to": "prob_2",
+      "evidence": []
+    },
+    {
+      "type": "hasIntervention",
+      "from": "session_1",
+      "to": "intv_1",
+      "evidence": []
+    },
+    {
+      "type": "hasIntervention",
+      "from": "session_1",
+      "to": "intv_2",
+      "evidence": []
+    },
+    {
+      "type": "hasIntervention",
+      "from": "session_1",
+      "to": "intv_3",
+      "evidence": []
+    },
+    {
+      "type": "hasHomework",
+      "from": "session_1",
+      "to": "hw_1",
+      "evidence": []
+    },
+    {
+      "type": "leadsTo",
+      "from": "at_2",
+      "to": "react_1",
+      "evidence": [
+        5
+      ],
+      "note": "Client explicitly states 'it's an awful thought' immediately after the automatic thought in turn 5."
+    },
+    {
+      "type": "stemsFrom",
+      "from": "at_3",
+      "to": "cb_1",
+      "evidence": [
+        17
+      ],
+      "note": "Client explicitly links dating people who can't see their worth to the core belief of being truly worthless (turn 15-16 context, explicit statement in turn 17)."
+    },
+    {
+      "type": "stemsFrom",
+      "from": "at_3",
+      "to": "cb_3",
+      "evidence": [
+        17
+      ],
+      "note": "Client states the need to date someone who 'couldn't see' or 'would never know', directly supporting the rule of hiding worthlessness from those perceptive enough (turn 17)."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_1",
+      "to": "ib_2",
+      "evidence": [
+        15,
+        17
+      ],
+      "note": "The subject states the rule of dating only those 'below my league' and explains that if they were truly worthless, they would need someone who couldn't see it to avoid rejection."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_1",
+      "to": "ib_3",
+      "evidence": [
+        15,
+        17
+      ],
+      "note": "The subject's reasoning in turn 17 directly supports this conditional rule: if truly worthless, they must date people who cannot see or judge that worthlessness."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_1",
+      "to": "ib_4",
+      "evidence": [
+        17
+      ],
+      "note": "In turn 17, the subject describes over-compensating by showing off external markers (house, job, happiness) to prove they are not worthless because they believe it."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_2",
+      "to": "ib_2",
+      "evidence": [
+        15,
+        17
+      ],
+      "note": "The subject states the rule of dating only those 'below my league' to avoid being seen as worthless and rejected by someone who is too smart."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_2",
+      "to": "ib_3",
+      "evidence": [
+        15,
+        17
+      ],
+      "note": "This object explicitly restates the subject's logic: if they are truly worthless, they must date people unaware of it to prevent exposure and rejection."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_3",
+      "to": "ib_2",
+      "evidence": [
+        15,
+        17
+      ],
+      "note": "The subject links dating 'below their league' or hiding behind smart people directly to the fear that others are too smart to see their worthlessness."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_3",
+      "to": "ib_3",
+      "evidence": [
+        15,
+        17
+      ],
+      "note": "This is a specific restatement of object 2 found in turns 15-17 regarding dating rules based on the core belief."
+    },
+    {
+      "type": "givesRiseTo",
+      "from": "cb_3",
+      "to": "ib_4",
+      "evidence": [
+        17
+      ],
+      "note": "The subject lists showing off house, job, and happiness as compensatory behaviors to prove they are not worthless despite believing it."
+    }
+  ],
+  "summary_counts": {
+    "nodes_total": 20,
+    "by_label": {
+      "Client": 1,
+      "Session": 1,
+      "AutomaticThought": 3,
+      "CoreBelief": 3,
+      "Homework": 1,
+      "IntermediateBelief": 4,
+      "Intervention": 3,
+      "Problem": 2,
+      "Reaction": 1,
+      "Situation": 1
+    },
+    "edges_total": 18
+  }
+}

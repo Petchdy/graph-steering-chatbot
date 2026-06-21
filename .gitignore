@@ -8,8 +8,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+chat_bot
 
 # OS / editor
 .DS_Store
 .vscode/
 .idea/
+
+# other
+DESIGN.md

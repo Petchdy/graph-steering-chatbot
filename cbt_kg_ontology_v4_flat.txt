@@ -1,0 +1,174 @@
+owl:Thing
+│
+├── Provenance
+│   └── Utterance
+│       ├─ text                  (string)   — verbatim transcript span
+│       ├─ speaker               (enum)     — therapist | client
+│       ├─ turnIndex             (integer)  — unique only WITHIN a Session (see `inSession`)
+│       └─ timestamp             (string, optional)
+│
+├── Client                                    ## top-level anchor for the whole graph
+│   └─ (no required fields)
+│
+├── SessionStructure
+│   ├── Session
+│   │   ├─ sessionNumber         (integer, optional)
+│   │   ├─ sessionType           (enum)     — evaluation | therapy
+│   │   ├─ date                  (string, optional)
+│   │   └─ duration              (string, optional)
+│   │
+│   ├── Problem                              ## FLAT — domain as property (was 7 subclasses)
+│   │   ├─ description           (string)
+│   │   └─ domain                (enum) — academic | work | social | family |
+│   │                                      financial | health | other
+│   │     ## Problem = GENERAL, ongoing theme. NOT a single moment (that is Situation).
+│   │     ## Test: would it appear as a session heading? → Problem.
+│   │     ## A Problem `manifestsAs` specific Situations.
+│   │
+│   ├── Goal
+│   │   └─ statement             (string)
+│   │
+│   ├── Intervention
+│   │   ├─ description           (string)   — condensed one-sentence summary (Stage 1.2)
+│   │   ├─ technique             (enum) — ## CACTUS 12 (Lee et al. 2024)
+│   │   │      efficiencyEvaluation | pieChartTechnique | alternativePerspective |
+│   │   │      decatastrophizing | prosAndConsAnalysis | evidenceBasedQuestioning |
+│   │   │      realityTesting | continuumTechnique | changingRulesToWishes |
+│   │   │      behaviorExperiment | problemSolvingSkillsTraining | systematicExposure | other
+│   │   └─ techniqueLabel        (string, optional)   — free text when technique = other
+│   │
+│   └── Homework
+│       ├─ taskDescription       (string)
+│       ├─ taskType              (enum) — thoughtRecord | behavioralExperiment |
+│       │                                 activityScheduling | copingCard |
+│       │                                 skillsPractice | reading | other
+│       └─ isOptional            (boolean)
+│
+└── CognitiveModel
+    ├── CoreBelief                           ## FLAT — domain as property (was 3 subclasses)
+    │   ├─ content               (string)
+    │   ├─ domain                (enum) — self | world | others
+    │   └─ category              (enum, optional) — helpless | unlovable | worthless
+    │         CONSTRAINT: populate ONLY when domain = self. Leave null otherwise.
+    │         (Beck Fig 14.1; self-directed beliefs only.)
+    │
+    ├── IntermediateBelief                   ## FLAT — subtype as property (was 3 subclasses)
+    │   ├─ content               (string)
+    │   └─ subtype               (enum) — attitude | rule | assumption
+    │         attitude   = an evaluation        ("It's terrible to fail")
+    │         rule       = a demand/standard    ("I must always do my best")
+    │         assumption = a conditional if-then ("If I ask for help, I'm incompetent")
+    │
+    ├── Situation
+    │   ├─ description           (string)
+    │   ├─ kind                  (enum) — externalSituation | thoughtStream | image |
+    │   │                                 emotion | behavior | physiological
+    │   │     NOTE: `kind` is the trigger CHANNEL only — carries NO time meaning.
+    │   │       `thoughtStream` = vague spiral; AT extracted = conclusion of the spiral.
+    │   │       `behavior`/`physiological` as kind = FIRST link in chain only;
+    │   │         if it follows a thought → it is a Reaction, not a Situation.
+    │   └─ temporality           (enum, optional) — past | present | anticipated
+    │         RULE: populate ONLY with an explicit time marker; else null.
+    │               `temporality` is the ONLY property carrying time.
+    │
+    │   ## SITUATION vs PROBLEM:
+    │   ##   Situation = ONE concrete moment that triggers a specific automatic thought.
+    │   ##   Problem   = a GENERAL recurring area of difficulty / agenda heading.
+    │   ##   Test: one specific AT attachable to this moment? → Situation. Broad theme? → Problem.
+    │   ##   Link: Problem manifestsAs Situation.
+    │
+    ├── AutomaticThought
+    │   ├─ content               (string)
+    │   ├─ modality              (enum) — verbal | image
+    │   └─ distortionType        (enum, optional) — ## CACTUS / PatternReframe (10 patterns)
+    │         allOrNothing | catastrophizing | discountingPositive | fortuneTelling |
+    │         labeling | mentalFiltering | mindReading | overgeneralization |
+    │         personalization | shouldStatements | none
+    │
+    ├── Reaction                             ## FLAT — channel as property (was 3 subclasses)
+    │   ├─ content               (string)
+    │   ├─ channel               (enum) — emotional | behavioral | physiological
+    │   └─ valence               (enum, optional) — positive | negative
+    │         CONSTRAINT: populate ONLY when channel = emotional.
+    │         RULE: lexicon-derived (Thai emotion list), NOT LLM.
+    │
+    └── AdaptiveResponse
+        └─ content               (string)
+              NOTE: BALANCED response, not positive (Beck p.171).
+              EXTRACTION: multi-turn product; extract in Stage 3 wide window.
+
+
+
+COGNITIVE CHAIN
+  CoreBelief          givesRiseTo            IntermediateBelief
+  IntermediateBelief  influencesPerceptionOf Situation
+  Situation           triggers               AutomaticThought
+  AutomaticThought    leadsTo                Reaction
+                        └─ EDGE PROPERTY: reportedIntensity (string, optional)
+  AutomaticThought    stemsFrom              CoreBelief
+  Reaction            reinforces             CoreBelief
+                        └─ Stage 3 wide-window LLM pass over already-extracted node pairs.
+                           Do NOT attempt per-turn. Absence is informative.
+  Reaction            becomesSituation       Situation
+                        └─ ⚠ Weakest grounding — complex/longitudinal extension, not basic Beck.
+  AutomaticThought    hasAdaptiveResponse    AdaptiveResponse
+
+STRUCTURE — client anchor
+  Client              hasSession             Session
+
+STRUCTURE — session → content (added in final pipeline step)
+  Session             hasProblem             Problem
+  Session             hasIntervention        Intervention
+  Session             hasHomework            Homework
+
+STRUCTURE — problem / goal
+  Problem             manifestsAs            Situation
+  Goal                targetsProblem         Problem
+  Homework            targets                {Problem | AutomaticThought | IntermediateBelief | CoreBelief}
+
+CROSS-LAYER HINGE
+  AutomaticThought    associatedWith         Problem
+                        └─ FALLBACK ONLY: when no Situation available.
+  Intervention        appliedTo              {AutomaticThought | IntermediateBelief | CoreBelief | Problem}
+  Intervention        produces               AdaptiveResponse
+                        └─ only when transcript shows technique generating the response.
+
+  ## REFRAME SUB-GRAPH:
+  ##   Intervention --appliedTo-->             AutomaticThought
+  ##   Intervention --produces-->              AdaptiveResponse
+  ##   AutomaticThought --hasAdaptiveResponse--> AdaptiveResponse
+  ## Three states: not examined | examined-but-unresolved | fully reframed.
+
+PROVENANCE
+  <any node>          evidencedBy            Utterance
+                        └─ multi-valued. Merged node carries UNION of all source utterances.
+  Utterance           inSession              Session
+
+
+## ─────────────────────────────────────────────────────────────────────────────
+## FLAT vs SUBCLASS TRADEOFFS (vs ontology_v4.txt)
+##
+##   FLAT ADVANTAGES
+##   - Simpler extraction: one node label per class; LLM emits a property string.
+##   - Simpler merge: one merge key pattern per class type.
+##   - Simpler Cypher for single-axis queries (no multi-label match needed).
+##
+##   FLAT DISADVANTAGES
+##   - No structural guarantee on constraints: `category` valid only for domain=self;
+##     `valence` valid only for channel=emotional. Must be enforced in pipeline / schema
+##     validation, not by the graph structure itself.
+##   - Indexing: domain/channel/subtype now need explicit property indexes in Neo4j
+##     (CREATE INDEX FOR (n:CoreBelief) ON (n.domain)) to be as fast as label scans.
+##   - Loss of label-based routing: extraction code can't branch on the Neo4j label;
+##     must branch on the property value instead.
+##
+##   SAME AS V4 (unchanged)
+##   - All edges, all edge semantics, all rules
+##   - Situation.kind / temporality design
+##   - distortionType enum (PatternReframe / CACTUS)
+##   - technique enum (CACTUS 12)
+##   - Homework.taskType
+##   - AdaptiveResponse (content only, no modality)
+##   - Goal targetsProblem Problem (direction)
+##   - All deferred items (FormativeExperience, CopingStrategy, AdaptiveBelief)
+## ─────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CACTUS — CBT Therapist</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --sage:    #4a7c59;
+    --sage-lt: #e8f0ea;
+    --sand:    #f7f4ef;
+    --ink:     #1c1c1c;
+    --muted:   #6b7280;
+    --border:  #dde3db;
+    --white:   #ffffff;
+    --radius:  14px;
+    --shadow:  0 2px 12px rgba(0,0,0,0.07);
+  }
+
+  html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--sand); color: var(--ink); }
+
+  /* ── Layout ── */
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--white);
+    box-shadow: 0 0 40px rgba(0,0,0,0.06);
+  }
+
+  /* ── Header ── */
+  header {
+    padding: 18px 24px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--white);
+    flex-shrink: 0;
+  }
+  .header-top { display: flex; align-items: center; gap: 12px; }
+  .logo-mark {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: var(--sage);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .logo-mark svg { width: 20px; height: 20px; fill: none; stroke: white; stroke-width: 2; }
+  .header-text h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.15rem; font-weight: 400; color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .header-text p { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
+
+  .technique-pill {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 20px;
+    background: var(--sage-lt); color: var(--sage);
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.03em;
+    text-transform: uppercase; white-space: nowrap;
+    transition: opacity 0.3s;
+  }
+  .technique-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sage); }
+
+  .session-meta {
+    display: flex; gap: 16px; margin-top: 10px;
+  }
+  .meta-item { font-size: 0.7rem; color: var(--muted); }
+  .meta-item strong { color: var(--sage); font-weight: 600; }
+
+  /* ── Messages ── */
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scroll-behavior: smooth;
+  }
+
+  .msg { display: flex; gap: 10px; max-width: 88%; animation: fadeUp 0.25s ease; }
+  .msg.therapist { align-self: flex-start; }
+  .msg.client    { align-self: flex-end; flex-direction: row-reverse; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; font-weight: 600; margin-top: 2px;
+  }
+  .therapist .avatar { background: var(--sage); color: white; }
+  .client    .avatar { background: #e2e8f0; color: var(--muted); }
+
+  .bubble {
+    padding: 12px 15px;
+    border-radius: var(--radius);
+    font-size: 0.875rem; line-height: 1.55;
+    max-width: 100%;
+  }
+  .therapist .bubble {
+    background: var(--sage-lt);
+    border-bottom-left-radius: 4px;
+    color: var(--ink);
+  }
+  .client .bubble {
+    background: var(--sage);
+    border-bottom-right-radius: 4px;
+    color: white;
+  }
+  .bubble .technique-tag {
+    display: inline-block;
+    margin-bottom: 6px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(74,124,89,0.15);
+    color: var(--sage);
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+
+  /* typing indicator */
+  .typing-bubble {
+    background: var(--sage-lt);
+    border-radius: var(--radius);
+    border-bottom-left-radius: 4px;
+    padding: 14px 16px;
+    display: flex; gap: 5px; align-items: center;
+  }
+  .typing-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--sage);
+    animation: bounce 1.2s infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+    40%            { transform: translateY(-5px); opacity: 1; }
+  }
+
+  /* ── Input area ── */
+  .input-area {
+    padding: 14px 20px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--white);
+    flex-shrink: 0;
+  }
+
+  .disclaimer {
+    font-size: 0.65rem; color: var(--muted);
+    text-align: center; margin-bottom: 10px;
+  }
+
+  .input-row { display: flex; gap: 10px; align-items: flex-end; }
+
+  textarea {
+    flex: 1;
+    font-family: 'Inter', sans-serif; font-size: 0.875rem;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    resize: none; outline: none;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--sand);
+    max-height: 120px;
+    transition: border-color 0.2s;
+  }
+  textarea:focus { border-color: var(--sage); background: var(--white); }
+  textarea::placeholder { color: #b0b8b4; }
+
+  .send-btn {
+    width: 42px; height: 42px;
+    border-radius: 50%; border: none; cursor: pointer;
+    background: var(--sage); color: white;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.2s, transform 0.1s;
+  }
+  .send-btn:hover { background: #3d6a4b; }
+  .send-btn:active { transform: scale(0.95); }
+  .send-btn:disabled { background: var(--border); cursor: not-allowed; }
+  .send-btn svg { width: 18px; height: 18px; fill: white; }
+
+  /* plan sidebar */
+  .plan-bar {
+    padding: 10px 20px;
+    background: #f0f4f1;
+    border-bottom: 1px solid var(--border);
+    display: none;
+    flex-shrink: 0;
+  }
+  .plan-bar.visible { display: block; }
+  .plan-bar h3 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--sage); font-weight: 600; margin-bottom: 6px; }
+  .plan-techniques { display: flex; gap: 6px; flex-wrap: wrap; }
+  .plan-badge {
+    padding: 3px 9px; border-radius: 20px;
+    background: white; border: 1px solid var(--border);
+    font-size: 0.68rem; color: var(--ink); font-weight: 500;
+  }
+  .plan-badge.active { background: var(--sage); color: white; border-color: var(--sage); }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <div class="header-top">
+      <div class="logo-mark">
+        <svg viewBox="0 0 24 24"><path d="M12 3C8 3 5 6 5 10c0 3 1.5 5.5 4 7l3 2 3-2c2.5-1.5 4-4 4-7 0-4-3-7-7-7z"/><path d="M12 8v4M10 10h4"/></svg>
+      </div>
+      <div class="header-text">
+        <h1>CACTUS Counseling</h1>
+        <p>Cognitive Behavioral Therapy · Guided Discovery Mode</p>
+      </div>
+      <div class="technique-pill" id="activePill">
+        <span class="dot"></span>
+        <span id="pillText">Session Starting</span>
+      </div>
+    </div>
+    <div class="session-meta">
+      <span class="meta-item">Turns: <strong id="turnCount">0</strong></span>
+      <span class="meta-item">Focus: <strong id="focusArea">–</strong></span>
+      <span class="meta-item">Mode: <strong>Questioner, not Answer-provider</strong></span>
+    </div>
+  </header>
+
+  <div class="plan-bar" id="planBar">
+    <h3>Session Plan — CBT Techniques</h3>
+    <div class="plan-techniques" id="planTechniques"></div>
+  </div>
+
+  <div class="messages" id="messages"></div>
+
+  <div class="input-area">
+    <p class="disclaimer">⚠️ This is an AI counseling simulation based on the CACTUS research paper. Not a substitute for professional mental health care.</p>
+    <div class="input-row">
+      <textarea id="userInput" rows="1" placeholder="Share what's on your mind…" maxlength="1200"></textarea>
+      <button class="send-btn" id="sendBtn" title="Send">
+        <svg viewBox="0 0 24 24"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+  history: [],
+  turns: 0,
+  currentTechnique: '',
+  sessionPlan: [],
+  planEstablished: false,
+  focusArea: ''
+};
+
+// ── CBT techniques from CACTUS paper ─────────────────────────────────────
+const CBT_TECHNIQUES = {
+  "Evidence-Based Questioning": "Guides clients to find evidence supporting or contradicting their thoughts",
+  "Alternative Perspective": "Asks how others might think in similar situations to encourage different interpretations",
+  "Decatastrophizing": "Reduces worst-case scenario thinking by evaluating actual likelihood",
+  "Reality Testing": "Explores how well thoughts align with reality vs. actual experiences",
+  "Pros and Cons Analysis": "Analyzes advantages and disadvantages of specific thoughts or beliefs",
+  "Efficiency Evaluation": "Evaluates the usefulness and practicality of beliefs in real-life situations",
+  "Continuum Technique": "Positions experiences between extremes for more nuanced evaluation",
+  "Changing Rules to Wishes": "Replaces strict rules with realistic hopes or wishes",
+  "Problem-Solving Skills": "Systematic methods for identifying problems and finding solutions",
+  "Behavior Experiment": "Trying new behaviors to challenge and modify negative beliefs"
+};
+
+// ── CACTUS system prompt ───────────────────────────────────────────────────
+function buildSystemPrompt() {
+  const techniqueList = Object.entries(CBT_TECHNIQUES)
+    .map(([k,v]) => `  - ${k}: ${v}`)
+    .join('\n');
+
+  return `You are a compassionate CBT (Cognitive Behavioral Therapy) counselor conducting a real counseling session. You follow the principles established in the CACTUS research paper on CBT-augmented counseling.
+
+## Your Core Philosophy (from CACTUS/CAMEL research)
+- You are a QUESTIONER, not an answer-provider. Guide clients to self-realization rather than delivering one-sided solutions.
+- Use guided discovery techniques — ask reflective questions that help clients organize their thoughts.
+- Do NOT directly suggest reframed thoughts (e.g., don't say "Remind yourself of positive moments"). Instead, guide the client to discover their own reframing.
+- Do NOT be overly empathetic beyond what the client expresses. Empathize specifically with what they share, not what you anticipate.
+- Foster a collaborative relationship. The goal is for the client to independently find their own solutions.
+- Avoid using psychological jargon with the client.
+
+## CBT Techniques You May Apply
+${techniqueList}
+
+## Session Structure (CACTUS approach)
+1. OPENING (turns 1-3): Warm welcome, establish rapport, understand the client's presenting concern through open questions.
+2. EXPLORATION (turns 4-8): Identify the negative thought patterns and cognitive distortions. Use gentle probing questions.
+3. TECHNIQUE APPLICATION (turns 9-16): Apply selected CBT technique through guided questions, helping client examine their thoughts.
+4. CONSOLIDATION (turns 17+): Help client articulate their own insights and next steps.
+
+## Output Format (CRITICAL)
+You MUST respond with valid JSON only. No other text. Format:
+{
+  "technique": "name of CBT technique being applied or 'Rapport Building' or 'Assessment'",
+  "focus": "brief phrase describing the cognitive pattern being addressed",
+  "response": "your counselor response to the client (warm, questioning, not advice-giving)",
+  "plan": ["technique1", "technique2", "technique3"]
+}
+
+The "plan" field should list the 1-3 CBT techniques you intend to use for this session (update as you learn more). Keep "response" natural and conversational, 2-4 sentences typically. Ask ONE clear question per turn.`;
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────
+function scrollBottom() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+function addMessage(role, text, technique) {
+  const m = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = `msg ${role}`;
+
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = role === 'therapist' ? 'T' : 'Y';
+
+  const bub = document.createElement('div');
+  bub.className = 'bubble';
+
+  if (role === 'therapist' && technique && technique !== 'Rapport Building' && technique !== 'Assessment') {
+    const tag = document.createElement('span');
+    tag.className = 'technique-tag';
+    tag.textContent = technique;
+    bub.appendChild(tag);
+    bub.appendChild(document.createElement('br'));
+  }
+
+  const txt = document.createElement('span');
+  txt.textContent = text;
+  bub.appendChild(txt);
+
+  wrap.appendChild(av);
+  wrap.appendChild(bub);
+  m.appendChild(wrap);
+  scrollBottom();
+}
+
+function showTyping() {
+  const m = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg therapist';
+  wrap.id = 'typing';
+  const av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = 'T';
+  const bub = document.createElement('div');
+  bub.className = 'typing-bubble';
+  bub.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+  wrap.appendChild(av);
+  wrap.appendChild(bub);
+  m.appendChild(wrap);
+  scrollBottom();
+}
+
+function hideTyping() {
+  const t = document.getElementById('typing');
+  if (t) t.remove();
+}
+
+function updatePill(text) {
+  document.getElementById('pillText').textContent = text;
+}
+
+function updatePlan(plan, currentTechnique) {
+  if (!plan || plan.length === 0) return;
+  const bar = document.getElementById('planBar');
+  const container = document.getElementById('planTechniques');
+  bar.classList.add('visible');
+  container.innerHTML = '';
+  plan.forEach(t => {
+    const b = document.createElement('div');
+    b.className = 'plan-badge' + (t === currentTechnique ? ' active' : '');
+    b.textContent = t;
+    container.appendChild(b);
+  });
+}
+
+// ── API call ──────────────────────────────────────────────────────────────
+async function callClaude(userMessage) {
+  // Add user message to history
+  state.history.push({ role: 'user', content: userMessage });
+
+  const body = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1000,
+    system: buildSystemPrompt(),
+    messages: state.history
+  };
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`API error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const rawText = data.content.map(b => b.text || '').join('');
+
+  // Parse JSON response
+  let parsed;
+  try {
+    const clean = rawText.replace(/```json|```/g, '').trim();
+    parsed = JSON.parse(clean);
+  } catch {
+    // Fallback: treat as plain text
+    parsed = { technique: 'Rapport Building', focus: '', response: rawText, plan: [] };
+  }
+
+  // Add assistant message to history (as plain text for context)
+  state.history.push({ role: 'assistant', content: parsed.response });
+
+  return parsed;
+}
+
+// ── Send message flow ─────────────────────────────────────────────────────
+async function sendMessage() {
+  const input = document.getElementById('userInput');
+  const btn = document.getElementById('sendBtn');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  btn.disabled = true;
+
+  // Show user bubble
+  addMessage('client', text);
+  state.turns++;
+  document.getElementById('turnCount').textContent = state.turns;
+
+  showTyping();
+  updatePill('Thinking…');
+
+  try {
+    const result = await callClaude(text);
+    hideTyping();
+
+    state.currentTechnique = result.technique || 'Rapport Building';
+    if (result.focus) {
+      state.focusArea = result.focus;
+      document.getElementById('focusArea').textContent = result.focus;
+    }
+
+    updatePill(state.currentTechnique);
+    if (result.plan && result.plan.length > 0) {
+      state.sessionPlan = result.plan;
+    }
+    updatePlan(state.sessionPlan, state.currentTechnique);
+
+    addMessage('therapist', result.response, state.currentTechnique);
+  } catch (err) {
+    hideTyping();
+    addMessage('therapist', `I'm having trouble connecting right now. Please try again in a moment. (${err.message})`, null);
+  }
+
+  btn.disabled = false;
+  input.focus();
+}
+
+// ── Auto-resize textarea ──────────────────────────────────────────────────
+const ta = document.getElementById('userInput');
+ta.addEventListener('input', () => {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+});
+ta.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+
+// ── Opening message ────────────────────────────────────────────────────────
+(async () => {
+  showTyping();
+  updatePill('Starting session…');
+  await new Promise(r => setTimeout(r, 900));
+  hideTyping();
+
+  const opener = "Hello, and welcome. I'm glad you're here today. This is a safe space to talk about whatever is on your mind.\n\nBefore we begin, I'd like to understand a little about what brought you here. What's been weighing on you lately, or what would you most like to explore in our time together?";
+  state.history.push({ role: 'assistant', content: opener });
+  addMessage('therapist', opener, null);
+  updatePill('Rapport Building');
+})();
+</script>
+</body>
+</html>

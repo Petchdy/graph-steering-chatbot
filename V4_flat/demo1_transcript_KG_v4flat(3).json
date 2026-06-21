@@ -1,0 +1,300 @@
+{
+  "meta": {
+    "schema_version": "ontology_v4_flat",
+    "transcript": "demo1_transcript.json",
+    "session_type": "therapy",
+    "n_turns": 3,
+    "speaker_enum": [
+      "therapist",
+      "client"
+    ],
+    "generated_by": "cbt v4 pipeline"
+  },
+  "tbox_nodes": [
+    {
+      "id": "tbox_OWL_Thing",
+      "label": "TBox",
+      "name": "OWL_Thing"
+    },
+    {
+      "id": "tbox_Provenance",
+      "label": "TBox",
+      "name": "Provenance"
+    },
+    {
+      "id": "tbox_Utterance",
+      "label": "TBox",
+      "name": "Utterance"
+    },
+    {
+      "id": "tbox_SessionStructure",
+      "label": "TBox",
+      "name": "SessionStructure"
+    },
+    {
+      "id": "tbox_Session",
+      "label": "TBox",
+      "name": "Session"
+    },
+    {
+      "id": "tbox_Client",
+      "label": "TBox",
+      "name": "Client"
+    },
+    {
+      "id": "tbox_Problem",
+      "label": "TBox",
+      "name": "Problem"
+    },
+    {
+      "id": "tbox_Goal",
+      "label": "TBox",
+      "name": "Goal"
+    },
+    {
+      "id": "tbox_Intervention",
+      "label": "TBox",
+      "name": "Intervention"
+    },
+    {
+      "id": "tbox_Homework",
+      "label": "TBox",
+      "name": "Homework"
+    },
+    {
+      "id": "tbox_CognitiveModel",
+      "label": "TBox",
+      "name": "CognitiveModel"
+    },
+    {
+      "id": "tbox_CoreBelief",
+      "label": "TBox",
+      "name": "CoreBelief"
+    },
+    {
+      "id": "tbox_IntermediateBelief",
+      "label": "TBox",
+      "name": "IntermediateBelief"
+    },
+    {
+      "id": "tbox_Situation",
+      "label": "TBox",
+      "name": "Situation"
+    },
+    {
+      "id": "tbox_AutomaticThought",
+      "label": "TBox",
+      "name": "AutomaticThought"
+    },
+    {
+      "id": "tbox_Reaction",
+      "label": "TBox",
+      "name": "Reaction"
+    },
+    {
+      "id": "tbox_AdaptiveResponse",
+      "label": "TBox",
+      "name": "AdaptiveResponse"
+    }
+  ],
+  "tbox_edges": [
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Provenance",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Utterance",
+      "to": "tbox_Provenance"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_SessionStructure",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Session",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Client",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Problem",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Goal",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Intervention",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Homework",
+      "to": "tbox_SessionStructure"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_CognitiveModel",
+      "to": "tbox_OWL_Thing"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_CoreBelief",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_IntermediateBelief",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Situation",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_AutomaticThought",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_Reaction",
+      "to": "tbox_CognitiveModel"
+    },
+    {
+      "type": "SUB_CLASS_OF",
+      "from": "tbox_AdaptiveResponse",
+      "to": "tbox_CognitiveModel"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "client_1",
+      "label": "Client",
+      "parent": null,
+      "properties": {},
+      "evidence": []
+    },
+    {
+      "id": "session_1",
+      "label": "Session",
+      "parent": null,
+      "properties": {
+        "sessionType": "therapy"
+      },
+      "evidence": []
+    },
+    {
+      "id": "at_1",
+      "label": "AutomaticThought",
+      "parent": null,
+      "properties": {
+        "content": "I will never find somebody who loves me.",
+        "distortionType": "fortuneTelling",
+        "modality": "verbal"
+      },
+      "evidence": [
+        1
+      ]
+    },
+    {
+      "id": "intv_1",
+      "label": "Intervention",
+      "parent": null,
+      "properties": {
+        "description": "The therapist acknowledges the client's breakup and resulting negative cascade of thoughts about their future. They introduce 'laddering,' a technique to organize automatic thoughts (compared to an iceberg tip) by uncovering submerged core beliefs that drive feelings and behaviors. Starting with the thought 'I will never find somebody who loves me,' the therapist asks what this means to the client, aiming to trace how this specific belief influences their experience.",
+        "technique": "realityTesting"
+      },
+      "evidence": [
+        2
+      ]
+    },
+    {
+      "id": "prob_1",
+      "label": "Problem",
+      "parent": null,
+      "properties": {
+        "description": "I will never find someone who loves me / I am unlovable due to age and past breakups",
+        "domain": "social"
+      },
+      "evidence": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "sit_1",
+      "label": "Situation",
+      "parent": null,
+      "properties": {
+        "description": "recently broke up with a long long-term partner",
+        "kind": "externalSituation"
+      },
+      "evidence": [
+        1
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "type": "hasSession",
+      "from": "client_1",
+      "to": "session_1",
+      "evidence": []
+    },
+    {
+      "type": "hasProblem",
+      "from": "session_1",
+      "to": "prob_1",
+      "evidence": []
+    },
+    {
+      "type": "hasIntervention",
+      "from": "session_1",
+      "to": "intv_1",
+      "evidence": []
+    },
+    {
+      "type": "triggers",
+      "from": "sit_1",
+      "to": "at_1",
+      "evidence": [
+        1
+      ],
+      "note": "The subject explicitly states the situation (recent breakup) leads to the automatic thought 'i might never find somebody who loves me'."
+    },
+    {
+      "type": "appliedTo",
+      "from": "intv_1",
+      "to": "at_1",
+      "evidence": [
+        2
+      ],
+      "note": "The therapist explicitly selects the thought 'I might never find somebody who will love me' (from turn 1) as the target for the laddering technique in turn 2."
+    }
+  ],
+  "summary_counts": {
+    "nodes_total": 6,
+    "by_label": {
+      "Client": 1,
+      "Session": 1,
+      "AutomaticThought": 1,
+      "Intervention": 1,
+      "Problem": 1,
+      "Situation": 1
+    },
+    "edges_total": 5
+  }
+}

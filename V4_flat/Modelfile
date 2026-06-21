@@ -1,0 +1,4 @@
+FROM qwen3.5:9b
+PARAMETER stop "<think>"
+PARAMETER stop "</think>"
+PARAMETER temperature 0
