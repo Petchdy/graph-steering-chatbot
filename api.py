@@ -1,16 +1,27 @@
 """FastAPI backend. Depends only on interfaces.py and factory.py."""
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 import factory
-from orchestrator import Session, turn
+from orchestrator import Session, async_turn
 
 app = FastAPI(title="CACTUS CBT Chatbot")
 
 _sessions: dict[str, Session] = {}
 
-_SESSION_KEYS = {"session_phase", "active_technique"}
+_LABEL_TYPE_MAP = {
+    "Session": "session", "Client": "session",
+    "Problem": "session_structure", "Goal": "session_structure",
+    "Intervention": "session_structure", "Homework": "session_structure",
+    "CoreBelief": "cognitive", "IntermediateBelief": "cognitive",
+    "Situation": "cognitive", "AutomaticThought": "cognitive",
+    "Reaction": "cognitive", "AdaptiveResponse": "cognitive",
+    "Utterance": "provenance",
+}
 
 
 def _get_or_create(session_id: str) -> Session:
@@ -25,6 +36,10 @@ def _get_or_create(session_id: str) -> Session:
     return _sessions[session_id]
 
 
+def _node_type(label: str) -> str:
+    return _LABEL_TYPE_MAP.get(label, "field")
+
+
 class ChatRequest(BaseModel):
     session_id: str
     message: str
@@ -36,6 +51,7 @@ class ChatResponse(BaseModel):
     phase: str = ""
     deltas: dict[str, str]
     slots: dict
+    extraction_mode: str = "async"
 
 
 class ResetRequest(BaseModel):
@@ -43,9 +59,9 @@ class ResetRequest(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest) -> ChatResponse:
     session = _get_or_create(request.session_id)
-    result = turn(session, request.message)
+    result = await async_turn(session, request.message)
     return ChatResponse(**result)
 
 
@@ -61,31 +77,32 @@ def reset(request: ResetRequest) -> dict:
 
 @app.get("/graph/{session_id}")
 def get_graph(session_id: str) -> dict:
-    """Cytoscape-compatible node/edge JSON for the session's slot-fill graph."""
+    """Cytoscape-compatible node/edge JSON from the rich graph."""
     if session_id not in _sessions:
         return {"nodes": [], "edges": []}
 
-    snapshot = _sessions[session_id].graph.snapshot()
-    nodes = [{"data": {"id": "session", "label": "Session", "type": "session"}}]
+    graph = _sessions[session_id].graph
+    nodes = []
     edges = []
 
-    for key, entry in snapshot.items():
-        if key in _SESSION_KEYS:
-            ntype = "session_state"
-        elif entry["acquired"]:
-            ntype = "field"
-        else:
-            ntype = "missing"
+    for node in graph.nodes():
+        ntype = _node_type(node.label) if node.status == "found" else "missing"
+        content = (node.props.get("content") or node.props.get("description") or "")[:25]
+        label = f"{node.label}\n{content}" if node.status == "found" and content else node.label
+        nodes.append({"data": {
+            "id": node.node_id,
+            "label": label,
+            "type": ntype,
+            "status": node.status,
+        }})
 
-        label = f"{key}\n{str(entry['value'])[:25]}" if entry["acquired"] else key
-        nodes.append({"data": {"id": f"f_{key}", "label": label, "type": ntype}})
-        edges.append({
-            "data": {
-                "source": "session",
-                "target": f"f_{key}",
-                "label": "HAS" if entry["acquired"] else "MISSING",
-            }
-        })
+    for edge in graph.edges():
+        edges.append({"data": {
+            "source": edge.subject_id,
+            "target": edge.object_id,
+            "label": edge.predicate if edge.status == "found" else "",
+            "status": edge.status,
+        }})
 
     return {"nodes": nodes, "edges": edges}
 

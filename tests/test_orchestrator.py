@@ -1,11 +1,13 @@
 """Proves the turn loop works with zero external services:
 InMemoryGraphStore + StubExtractor + EchoGenerator."""
 
+import asyncio
+
 from extract import StubExtractor
 from generate import EchoGenerator
 from graph import InMemoryGraphStore
-from orchestrator import Session, turn, validate_phase
-from schema import CBTSchema
+from orchestrator import Session, turn, async_turn, validate_phase
+from schema import CBTSchema, CBT_NODE_CLASSES
 
 CLINICAL_FIELDS = [
     "presenting_problem", "emotion", "negative_thought", "cognitive_pattern",
@@ -101,3 +103,62 @@ def test_validate_phase_enforces_minimums():
 
     # Always allowed to stay in same phase or go back
     assert validate_phase("Rapport", "Exploration", snap_empty, 0) == "Rapport"
+
+
+# ── New v6 tests ──────────────────────────────────────────────────────────────
+
+def test_async_turn_returns_expected_keys():
+    session = _make_session()
+    result = asyncio.run(async_turn(session, "presenting_problem: work stress"))
+    assert "reply" in result
+    assert "phase" in result
+    assert "technique" in result
+    assert "extraction_mode" in result
+    assert result["extraction_mode"] in ("sync", "async")
+
+
+def test_rich_graph_has_placeholder_nodes():
+    session = _make_session()
+    nodes = session.graph.nodes()
+    node_labels = {n.label for n in nodes}
+    for cls in CBT_NODE_CLASSES:
+        assert cls["label"] in node_labels, f"Missing placeholder for {cls['label']}"
+
+
+def test_rich_graph_upsert_creates_found_node():
+    session = _make_session()
+    node = session.graph.upsert_node(
+        "Situation",
+        {"description": "exam tomorrow", "kind": "externalSituation"},
+        turn_id=1,
+    )
+    assert node.status == "found"
+    assert node.label == "Situation"
+    placeholders = [n for n in session.graph.nodes()
+                    if n.label == "Situation" and n.status == "missing"]
+    assert len(placeholders) == 0
+
+
+def test_rich_graph_multi_instance():
+    session = _make_session()
+    n1 = session.graph.upsert_node("Situation", {"description": "exam tomorrow"}, turn_id=1)
+    n2 = session.graph.upsert_node("Situation", {"description": "fight with friend"}, turn_id=2)
+    assert n1.node_id != n2.node_id
+    found = [n for n in session.graph.nodes()
+             if n.label == "Situation" and n.status == "found"]
+    assert len(found) == 2
+
+
+def test_resolve_edge_marks_found():
+    session = _make_session()
+    sit = session.graph.upsert_node("Situation", {"description": "exam"}, 1)
+    at  = session.graph.upsert_node("AutomaticThought", {"content": "I will fail"}, 1)
+    edge = session.graph.resolve_edge(sit.node_id, "triggers", at.node_id, 1)
+    assert edge.status == "found"
+    found_edges = [e for e in session.graph.edges() if e.status == "found"]
+    assert any(e.predicate == "triggers" for e in found_edges)
+
+
+def test_extraction_lock_exists():
+    session = _make_session()
+    assert isinstance(session.extraction_lock, asyncio.Lock)

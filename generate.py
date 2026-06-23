@@ -1,7 +1,7 @@
 """Swappable response generators. All return dict: {response, technique, phase}.
 
 EchoGenerator        - deterministic offline stub for tests.
-LocalLLMGenerator    - Ollama native /api/chat (qwen3:8b). Primary path.
+LocalLLMGenerator    - Ollama native /api/chat (qwen3.5-nothink). Primary path.
 OpenRouterGenerator  - Claude via OpenRouter. Optional alternative.
 """
 
@@ -22,13 +22,27 @@ def _build_messages(system: str, history: list[tuple[str, str]]) -> list[dict]:
 
 
 def _parse_json(raw: str) -> dict:
-    """Strip markdown fences and parse JSON. Returns fallback dict on failure."""
+    """Strip markdown fences and parse JSON. Returns fallback dict on failure.
+
+    qwen3.5 with format=json sometimes over-escapes string delimiters as `\\"`
+    instead of `"`. We retry with those collapsed when the first parse fails.
+    """
     cleaned = re.sub(r"^```json\s*|^```\s*|```$", "", raw.strip(), flags=re.MULTILINE).strip()
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        print(f"[generate] JSON parse failed, using raw text as response. raw={raw[:120]!r}")
-        return {"response": raw, "technique": "Rapport Building", "phase": "Rapport"}
+        pass
+    try:
+        fixed = cleaned.replace('\\"', '"')
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    # Last-ditch: pull out a "response" string by regex so the chat doesn't break.
+    m = re.search(r'"response"\s*:\s*\\?"(.+?)\\?"\s*,', cleaned, re.DOTALL)
+    if m:
+        return {"response": m.group(1), "technique": "Rapport Building", "phase": "Rapport"}
+    print(f"[generate] JSON parse failed, using raw text as response. raw={raw[:120]!r}")
+    return {"response": raw, "technique": "Rapport Building", "phase": "Rapport"}
 
 
 _FALLBACK = {"response": "", "technique": "Rapport Building", "phase": "Rapport"}
@@ -49,7 +63,7 @@ class LocalLLMGenerator:
     API; the /v1 endpoint can stall or return empty content.
     """
 
-    def __init__(self, model: str = "qwen3:8b", base_url: str = "http://localhost:11434/v1"):
+    def __init__(self, model: str = "qwen3.5-nothink", base_url: str = "http://localhost:11434/v1"):
         self._model = model
         self._host = base_url.removesuffix("/v1")
 
@@ -59,8 +73,16 @@ class LocalLLMGenerator:
         messages = _build_messages(system, history)
         response = requests.post(
             f"{self._host}/api/chat",
-            json={"model": self._model, "messages": messages, "stream": False, "think": False},
-            timeout=120,
+            json={
+                "model": self._model,
+                "messages": messages,
+                "stream": False,
+                "think": False,
+                "format": "json",
+                "keep_alive": "10m",
+                "options": {"temperature": 0.4},
+            },
+            timeout=180,
         )
         if not response.ok:
             raise RuntimeError(f"Ollama /api/chat {response.status_code}: {response.text}")

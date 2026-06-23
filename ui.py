@@ -1,13 +1,25 @@
 """Gradio UI — two-column: chat (left) + live Cytoscape graph (right)."""
 
 import json
+from dotenv import load_dotenv
+load_dotenv()
 
 import gradio as gr
 
 import factory
 from orchestrator import Session, turn
 
-_SESSION_KEYS = {"session_phase", "active_technique"}
+_LABEL_TYPE_MAP = {
+    "Session": "session", "Client": "session",
+    "Problem": "session_structure", "Goal": "session_structure",
+    "Intervention": "session_structure", "Homework": "session_structure",
+    "CoreBelief": "cognitive", "IntermediateBelief": "cognitive",
+    "Situation": "cognitive", "AutomaticThought": "cognitive",
+    "Reaction": "cognitive", "AdaptiveResponse": "cognitive",
+    "Utterance": "provenance",
+}
+
+_CONTENT_KEYS = ("content", "description", "statement", "taskDescription", "text")
 
 INTRO = (
     "Hello, and welcome. I'm glad you're here today. "
@@ -19,13 +31,24 @@ CYTOSCAPE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytosca
 
 NODE_STYLES = json.dumps([
     {"selector": 'node[type="session"]',
-     "style": {"background-color": "#2d6a4f", "color": "#fff", "label": "data(label)",
-                "text-wrap": "wrap", "text-valign": "center", "font-size": "11px",
+     "style": {"background-color": "#2d6a4f", "color": "#fff",
+                "label": "data(label)", "text-wrap": "wrap",
+                "text-valign": "center", "font-size": "11px",
                 "width": 80, "height": 80, "shape": "ellipse"}},
-    {"selector": 'node[type="field"]',
+    {"selector": 'node[type="session_structure"]',
      "style": {"background-color": "#74c69d", "label": "data(label)",
                 "text-wrap": "wrap", "text-valign": "center", "font-size": "10px",
-                "width": 70, "height": 70}},
+                "width": 70, "height": 70, "shape": "round-rectangle"}},
+    {"selector": 'node[type="cognitive"]',
+     "style": {"background-color": "#9b72cf", "color": "#fff",
+                "label": "data(label)", "text-wrap": "wrap",
+                "text-valign": "center", "font-size": "10px",
+                "width": 70, "height": 70, "shape": "ellipse"}},
+    {"selector": 'node[type="provenance"]',
+     "style": {"background-color": "#6c757d", "color": "#fff",
+                "label": "data(label)", "text-wrap": "wrap",
+                "text-valign": "center", "font-size": "10px",
+                "width": 60, "height": 60, "shape": "tag"}},
     {"selector": 'node[type="session_state"]',
      "style": {"background-color": "#f4a261", "label": "data(label)",
                 "text-wrap": "wrap", "text-valign": "center", "font-size": "10px",
@@ -35,33 +58,51 @@ NODE_STYLES = json.dumps([
                 "text-valign": "center", "font-size": "9px",
                 "width": 50, "height": 50,
                 "border-style": "dashed", "border-color": "#adb5bd", "border-width": 2}},
-    {"selector": "edge",
+    {"selector": 'edge[status="found"]',
      "style": {"label": "data(label)", "font-size": "8px", "curve-style": "bezier",
-                "target-arrow-shape": "triangle", "line-color": "#adb5bd",
-                "target-arrow-color": "#adb5bd", "arrow-scale": 0.7}},
+                "target-arrow-shape": "triangle", "line-color": "#74c69d",
+                "target-arrow-color": "#74c69d", "arrow-scale": 0.7}},
+    {"selector": 'edge[status="missing"]',
+     "style": {"curve-style": "bezier", "target-arrow-shape": "triangle",
+                "line-color": "#dee2e6", "target-arrow-color": "#dee2e6",
+                "line-style": "dashed", "arrow-scale": 0.5}},
 ])
 
 
-def _build_elements(snapshot: dict) -> list:
-    elements = [{"data": {"id": "session", "label": "Session", "type": "session"}}]
-    for key, entry in snapshot.items():
-        if key in _SESSION_KEYS:
-            ntype = "session_state"
-        elif entry["acquired"]:
-            ntype = "field"
-        else:
-            ntype = "missing"
-        label = f"{key}\n{str(entry['value'])[:20]}" if entry["acquired"] else key
-        elements.append({"data": {"id": f"f_{key}", "label": label, "type": ntype}})
+def _node_type(label: str, status: str) -> str:
+    if status == "missing":
+        return "missing"
+    return _LABEL_TYPE_MAP.get(label, "field")
+
+
+def _content_preview(props: dict) -> str:
+    for key in _CONTENT_KEYS:
+        val = props.get(key)
+        if val:
+            return str(val)[:25]
+    return ""
+
+
+def _build_elements(graph) -> list:
+    elements = []
+    for n in graph.nodes():
+        ntype = _node_type(n.label, n.status)
+        preview = _content_preview(n.props)
+        label = f"{n.label}\n{preview}" if n.status == "found" and preview else n.label
         elements.append({"data": {
-            "source": "session", "target": f"f_{key}",
-            "label": "HAS" if entry["acquired"] else "MISSING",
+            "id": n.node_id, "label": label, "type": ntype, "status": n.status,
+        }})
+    for e in graph.edges():
+        elements.append({"data": {
+            "id": e.edge_id, "source": e.subject_id, "target": e.object_id,
+            "label": e.predicate if e.status == "found" else "",
+            "status": e.status,
         }})
     return elements
 
 
-def _render_graph(snapshot: dict) -> str:
-    elements_json = json.dumps(_build_elements(snapshot))
+def _render_graph(graph) -> str:
+    elements_json = json.dumps(_build_elements(graph))
     styles_json = NODE_STYLES
     
     html_content = f"""
@@ -118,14 +159,14 @@ def _bot_respond(message: str, history: list, session: Session):
         session = _new_session()
     result = turn(session, message)
     history = history + [{"role": "assistant", "content": result["reply"]}]
-    graph_html = _render_graph(result["slots"])
+    graph_html = _render_graph(session.graph)
     return history, session, result["phase"], result["technique"], graph_html
 
 
 def _reset():
     session = _new_session()
     history = [{"role": "assistant", "content": INTRO}]
-    graph_html = _render_graph(session.graph.snapshot())
+    graph_html = _render_graph(session.graph)
     return history, session, "Rapport", "—", graph_html
 
 

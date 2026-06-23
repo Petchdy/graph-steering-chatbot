@@ -4,15 +4,11 @@ Env vars select which backend is wired in at construction time.
 
 import os
 
-from dotenv import load_dotenv
-
 from interfaces import Schema, GraphStore, Extractor, Generator
 from schema import CBTSchema
 from graph import InMemoryGraphStore, Neo4jGraphStore
-from extract import StubExtractor, LocalLLMExtractor
+from extract import StubExtractor, CBTExtractor
 from generate import EchoGenerator, LocalLLMGenerator, OpenRouterGenerator
-
-load_dotenv()
 
 
 def make_schema() -> Schema:
@@ -35,7 +31,7 @@ def make_graph(schema: Schema, session_id: str = "default") -> GraphStore:
 def make_extractor() -> Extractor:
     kind = os.environ.get("EXTRACTOR", "local")
     if kind == "local":
-        return LocalLLMExtractor(
+        return CBTExtractor(
             model=os.environ.get("OLLAMA_MODEL", "qwen3.5-nothink"),
             host=os.environ.get("OLLAMA_HOST", "http://localhost:11434"),
         )
