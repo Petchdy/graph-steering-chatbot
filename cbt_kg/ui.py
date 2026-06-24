@@ -491,8 +491,9 @@ function draw() {
     const shortLabel = n.label.length > 13 ? n.label.slice(0, 11) + '…' : n.label;
     ctx.fillText(shortLabel, n.x, n.y - 7);
     // Main prop snippet
-    const mainProp = Object.values(n.props || {})[0] || (isMissing ? 'missing' : '');
-    const shortProp = mainProp.toString().slice(0, 13) + (mainProp.toString().length > 13 ? '…' : '');
+    const rawProp = Object.values(n.props || {})[0];
+    const mainProp = rawProp !== undefined && rawProp !== null ? String(rawProp) : (isMissing ? 'missing' : '');
+    const shortProp = mainProp.slice(0, 13) + (mainProp.length > 13 ? '…' : '');
     ctx.font = '8px system-ui,sans-serif';
     ctx.fillStyle = isMissing ? '#ccc' : col;
     ctx.fillText(shortProp, n.x, n.y + 6);
