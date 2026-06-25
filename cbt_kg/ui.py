@@ -151,17 +151,7 @@ body { font-family: system-ui, sans-serif; font-size: 14px; background: #fafafa;
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
 .graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: #fff; }
-canvas { position: absolute; top: 0; left: 0; cursor: grab; }
-canvas.dragging { cursor: grabbing; }
-.viewport-toolbar { position: absolute; top: 10px; left: 10px; z-index: 2;
-  display: flex; align-items: center; gap: 4px; padding: 4px;
-  border: 0.5px solid #d1d5db; border-radius: 8px; background: rgba(255,255,255,0.94);
-  box-shadow: 0 8px 24px rgba(15,23,42,0.08); }
-.viewport-toolbar button { min-width: 28px; height: 28px; padding: 0 8px; border-radius: 6px;
-  border: 0.5px solid #d1d5db; background: #fff; color: #222; cursor: pointer;
-  font-size: 12px; font-weight: 600; line-height: 1; }
-.viewport-toolbar button:hover { background: #f3f4f6; }
-.viewport-toolbar .zoom-readout { min-width: 44px; text-align: center; font-size: 11px; color: #555; }
+canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
 .legend { padding: 7px 14px; border-top: 0.5px solid #e5e7eb;
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
   flex-shrink: 0; background: #fff; margin-top: auto; }
@@ -223,12 +213,6 @@ canvas.dragging { cursor: grabbing; }
   </div>
   <div class="workspace">
     <div class="graph-panel" id="gp">
-      <div class="viewport-toolbar" aria-label="Graph navigation controls">
-        <button type="button" id="zoomOut" title="Zoom out">-</button>
-        <span class="zoom-readout" id="zoomReadout">100%</span>
-        <button type="button" id="zoomIn" title="Zoom in">+</button>
-        <button type="button" id="zoomFit" title="Fit graph">Fit</button>
-      </div>
       <canvas id="gc"></canvas>
       <div class="legend">
         <div class="leg"><div class="ld" style="background:#E5E7EB;border:1px solid #D1D5DB;"></div>Client</div>
@@ -293,26 +277,11 @@ const RADIUS_RECT_H = 22;
 const RADIUS_RECT_W = 38;
 const ARROW_CLEARANCE = 8;
 const CURVE = 28;
-let world = {w: 900, h: 620};
-let view = {x: 0, y: 0, scale: 1};
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
 
 function applyLayout(W, H) {
   const MARGIN = 48;
   const RIGHT_W = 160;
-  const maxLayerCount = nodes.reduce(function(max, n) {
-    if (RIGHT_SIDE.has(n.label)) return max;
-    const layer = LAYERS[n.label] !== undefined ? LAYERS[n.label] : 6;
-    return Math.max(max, nodes.filter(function(x) {
-      return !RIGHT_SIDE.has(x.label) && (LAYERS[x.label] !== undefined ? LAYERS[x.label] : 6) === layer;
-    }).length);
-  }, 1);
-  world.w = Math.max(W, maxLayerCount * 150 + RIGHT_W + MARGIN * 3, Math.ceil(Math.sqrt(Math.max(nodes.length, 1)) * 230));
-  world.h = Math.max(H, 760, nodes.length * 18 + 520);
-  const MAIN_W = world.w - RIGHT_W - MARGIN * 2;
+  const MAIN_W = W - RIGHT_W - MARGIN * 2;
 
   // Bucket nodes into layer groups and right-side groups
   const layerGroups = {};
@@ -337,7 +306,7 @@ function applyLayout(W, H) {
     const row = layerGroups[l];
     const count = row.length;
     const slotW = MAIN_W / count;
-    const layerH = totalLayers > 1 ? (world.h - MARGIN * 2) / (totalLayers - 1) : world.h / 2;
+    const layerH = totalLayers > 1 ? (H - MARGIN * 2) / (totalLayers - 1) : H / 2;
     const yPos = MARGIN + layerIndex * layerH;
     row.forEach(function(n, i) {
       n.x = MARGIN + slotW * i + slotW / 2;
@@ -351,11 +320,11 @@ function applyLayout(W, H) {
   const rightLabelCount = rightLabelOrder.length;
   rightLabelOrder.forEach(function(label, labelIdx) {
     const group = rightGroups[label];
-    const groupSlotH = rightLabelCount > 0 ? (world.h - MARGIN * 2) / rightLabelCount : world.h - MARGIN * 2;
+    const groupSlotH = rightLabelCount > 0 ? (H - MARGIN * 2) / rightLabelCount : H - MARGIN * 2;
     const slotStart = MARGIN + labelIdx * groupSlotH;
     const itemH = group.length > 1 ? groupSlotH / group.length : groupSlotH;
     group.forEach(function(n, i) {
-      n.x = world.w - RIGHT_W / 2;
+      n.x = W - RIGHT_W / 2;
       n.y = slotStart + itemH * i + itemH / 2;
     });
   });
@@ -400,12 +369,12 @@ function applyLayout(W, H) {
     // Apply forces with layer-aware boundary clamping
     for (const n of nodes) {
       if (RIGHT_SIDE.has(n.label)) {
-        n.x = clamp(n.x + force[n.id].x * step, world.w - RIGHT_W - 10, world.w - 30);
-        n.y = clamp(n.y + force[n.id].y * step, 30, world.h - 30);
+        n.x = Math.max(W - RIGHT_W - 10, Math.min(W - 30, n.x + force[n.id].x * step));
+        n.y = Math.max(30, Math.min(H - 30, n.y + force[n.id].y * step));
       } else {
-        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : world.h / 2;
-        n.x = clamp(n.x + force[n.id].x * step, MARGIN + 20, MARGIN + MAIN_W - 20);
-        n.y = clamp(n.y + force[n.id].y * step, yBase - 42, yBase + 42);
+        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : H / 2;
+        n.x = Math.max(MARGIN + 20, Math.min(MARGIN + MAIN_W - 20, n.x + force[n.id].x * step));
+        n.y = Math.max(yBase - 25, Math.min(yBase + 25, n.y + force[n.id].y * step));
       }
     }
   }
@@ -433,50 +402,8 @@ function resize() {
   if (nodes.length > 0 && w > 50 && h > 50 && nodes.length !== lastNodeCount) {
     applyLayout(w, h);
     lastNodeCount = nodes.length;
-    fitView();
   }
   draw();
-}
-
-function screenToWorld(sx, sy) {
-  return {x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale};
-}
-
-function zoomAt(nextScale, sx, sy) {
-  const before = screenToWorld(sx, sy);
-  view.scale = clamp(nextScale, 0.25, 2.8);
-  view.x = sx - before.x * view.scale;
-  view.y = sy - before.y * view.scale;
-  updateZoomReadout();
-  draw();
-}
-
-function graphBounds() {
-  if (nodes.length === 0) return {minX: 0, minY: 0, maxX: world.w, maxY: world.h};
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of nodes) {
-    minX = Math.min(minX, n.x - RADIUS_RECT_W - 28);
-    minY = Math.min(minY, n.y - RADIUS_CIRCLE - 28);
-    maxX = Math.max(maxX, n.x + RADIUS_RECT_W + 28);
-    maxY = Math.max(maxY, n.y + RADIUS_CIRCLE + 28);
-  }
-  return {minX: minX, minY: minY, maxX: maxX, maxY: maxY};
-}
-
-function fitView() {
-  const W = cv.width / dpr, H = cv.height / dpr;
-  const b = graphBounds();
-  const bw = Math.max(b.maxX - b.minX, 1);
-  const bh = Math.max(b.maxY - b.minY, 1);
-  view.scale = clamp(Math.min(W / bw, H / bh), 0.25, 1.15);
-  view.x = (W - (b.minX + b.maxX) * view.scale) / 2;
-  view.y = (H - (b.minY + b.maxY) * view.scale) / 2;
-  updateZoomReadout();
-}
-
-function updateZoomReadout() {
-  const el = document.getElementById('zoomReadout');
-  if (el) el.textContent = Math.round(view.scale * 100) + '%';
 }
 
 // ── Edit-mode toolbar ─────────────────────────────────────────────────────
@@ -490,24 +417,12 @@ if (EDIT_MODE) {
   document.getElementById('btnEdge').addEventListener('click', startEdgeMode);
   document.getElementById('btnSave').addEventListener('click', saveJSON);
 }
-document.getElementById('zoomOut').addEventListener('click', function() {
-  zoomAt(view.scale / 1.18, cv.clientWidth / 2, cv.clientHeight / 2);
-});
-document.getElementById('zoomIn').addEventListener('click', function() {
-  zoomAt(view.scale * 1.18, cv.clientWidth / 2, cv.clientHeight / 2);
-});
-document.getElementById('zoomFit').addEventListener('click', function() {
-  fitView();
-  draw();
-});
 
 // ── State ─────────────────────────────────────────────────────────────────
 let selected = null;
 let edgeMode = false;
 let edgeFrom = null;
 let drag = null, dragOff = {x: 0, y: 0};
-let pan = null;
-let didPan = false;
 
 // ── Drawing ───────────────────────────────────────────────────────────────
 function roundRect(c, x, y, w, h, r) {
@@ -519,41 +434,15 @@ function roundRect(c, x, y, w, h, r) {
   c.closePath();
 }
 
-function ellipsize(text, maxWidth) {
-  let value = String(text || '');
-  if (!value) return '';
-  while (value.length > 1 && ctx.measureText(value).width > maxWidth) {
-    value = value.slice(0, -2) + '...';
-  }
-  return value;
-}
-
-function drawTextPill(text, x, y, font, fg, bg, maxWidth) {
-  ctx.font = font;
-  const value = ellipsize(text, maxWidth - 14);
-  if (!value) return;
-  const w = Math.min(maxWidth, Math.max(28, ctx.measureText(value).width + 14));
-  const h = parseInt(font, 10) + 8;
-  ctx.fillStyle = bg;
-  roundRect(ctx, x - w / 2, y - h / 2, w, h, 5);
-  ctx.fill();
-  ctx.fillStyle = fg;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(value, x, y + 0.5);
-}
-
 function nodeAt(x, y) {
-  const hitPad = Math.max(0, 10 / view.scale - 4);
   for (const n of nodes) {
     if (RECT_LABELS.has(n.label)) {
-      if (x >= n.x - RADIUS_RECT_W - hitPad && x <= n.x + RADIUS_RECT_W + hitPad &&
-          y >= n.y - RADIUS_RECT_H - hitPad && y <= n.y + RADIUS_RECT_H + hitPad) return n;
+      if (x >= n.x-RADIUS_RECT_W && x <= n.x+RADIUS_RECT_W && y >= n.y-RADIUS_RECT_H && y <= n.y+RADIUS_RECT_H) return n;
     }
   }
   for (const n of nodes) {
     if (!RECT_LABELS.has(n.label)) {
-      if (Math.hypot(n.x - x, n.y - y) < RADIUS_CIRCLE + hitPad) return n;
+      if (Math.hypot(n.x - x, n.y - y) < RADIUS_CIRCLE) return n;
     }
   }
   return null;
@@ -565,35 +454,15 @@ function edgeAt(x, y) {
   for (const e of edges) {
     const a = nmap[e.from], b = nmap[e.to];
     if (!a || !b) continue;
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const dist = Math.max(Math.hypot(dx, dy), 1);
-    const ux = dx / dist, uy = dy / dist;
-    const startR = RECT_LABELS.has(a.label) ? RADIUS_RECT_H : RADIUS_CIRCLE;
-    const endR = RECT_LABELS.has(b.label) ? RADIUS_RECT_H : RADIUS_CIRCLE;
-    const sx = a.x + ux * startR, sy = a.y + uy * startR;
-    const ex = b.x - ux * (endR + ARROW_CLEARANCE), ey = b.y - uy * (endR + ARROW_CLEARANCE);
-    const cx1 = sx + uy * CURVE, cy1 = sy - ux * CURVE;
-    const cx2 = ex + uy * CURVE, cy2 = ey - ux * CURVE;
-    let best = Infinity;
-    for (let i = 0; i <= 16; i++) {
-      const t = i / 16;
-      const mt = 1 - t;
-      const px = mt * mt * mt * sx + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * ex;
-      const py = mt * mt * mt * sy + 3 * mt * mt * t * cy1 + 3 * mt * t * t * cy2 + t * t * t * ey;
-      best = Math.min(best, Math.hypot(px - x, py - y));
-    }
-    if (best < Math.max(16, 22 / view.scale)) return e;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (Math.hypot(mx - x, my - y) < 16) return e;
   }
   return null;
 }
 
 function draw() {
   const W = cv.width / dpr, H = cv.height / dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
-  ctx.save();
-  ctx.translate(view.x, view.y);
-  ctx.scale(view.scale, view.scale);
   const nmap = {};
   for (const n of nodes) nmap[n.id] = n;
 
@@ -606,7 +475,7 @@ function draw() {
     const col = sel ? '#D85A30' : (isFound ? '#1D9E75' : '#bbb');
     ctx.save();
     ctx.strokeStyle = col;
-    ctx.lineWidth = (sel ? 2.2 : 1.4) / view.scale;
+    ctx.lineWidth = sel ? 2.2 : 1.4;
     if (!isFound) ctx.setLineDash([5, 3]);
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.max(Math.hypot(dx, dy), 1);
@@ -634,15 +503,10 @@ function draw() {
     // Edge label at bezier midpoint offset laterally
     const mx = (sx + ex) / 2 + uy * CURVE * 0.5;
     const my = (sy + ey) / 2 - ux * CURVE * 0.5;
-    drawTextPill(
-      e.predicate,
-      mx,
-      my - 7,
-      '10px system-ui,sans-serif',
-      sel ? '#A43F1E' : (isFound ? '#0F6E56' : '#64748B'),
-      'rgba(255,255,255,0.88)',
-      132
-    );
+    ctx.font = '9px system-ui,sans-serif';
+    ctx.fillStyle = sel ? '#D85A30' : (isFound ? '#0F6E56' : '#aaa');
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(e.predicate, mx, my - 7);
     ctx.restore();
   }
 
@@ -663,7 +527,7 @@ function draw() {
 
     ctx.fillStyle = bgCol;
     ctx.strokeStyle = sel ? '#D85A30' : col;
-    ctx.lineWidth = (sel ? 2.2 : 1.5) / view.scale;
+    ctx.lineWidth = sel ? 2.2 : 1.5;
     if (isMissing) ctx.setLineDash([4, 3]);
 
     if (isRect) {
@@ -689,24 +553,16 @@ function draw() {
     ctx.font = '8px system-ui,sans-serif';
     ctx.fillStyle = isMissing ? '#ccc' : col;
     ctx.fillText(shortProp, n.x, n.y + 6);
-    drawTextPill(n.label, n.x, n.y - 8, '11px system-ui,sans-serif',
-      isMissing ? '#64748B' : (BADGE_COLOR[n.label] || '#1F2937'),
-      'rgba(255,255,255,0.78)', isRect ? 68 : 58);
-    drawTextPill(mainProp, n.x, n.y + 7, '9px system-ui,sans-serif',
-      isMissing ? '#64748B' : '#334155',
-      'rgba(255,255,255,0.66)', isRect ? 70 : 58);
 
     ctx.restore();
   }
-  ctx.restore();
 }
 
 // ── Interaction ───────────────────────────────────────────────────────────
 cv.addEventListener('mousedown', function(e) {
   const r = cv.getBoundingClientRect();
-  const sx = e.clientX - r.left, sy = e.clientY - r.top;
-  const p = screenToWorld(sx, sy);
-  const n = nodeAt(p.x, p.y);
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const n = nodeAt(mx, my);
   if (edgeMode) {
     if (n) {
       if (!edgeFrom) { edgeFrom = n.id; draw(); }
@@ -717,45 +573,19 @@ cv.addEventListener('mousedown', function(e) {
     }
     return;
   }
-  if (n) { drag = n; dragOff = {x: p.x - n.x, y: p.y - n.y}; selectItem('node', n.id); return; }
-  const ed = edgeAt(p.x, p.y);
+  if (n) { drag = n; dragOff = {x: mx - n.x, y: my - n.y}; selectItem('node', n.id); return; }
+  const ed = edgeAt(mx, my);
   if (ed) { selectItem('edge', ed.id); return; }
-  pan = {x: sx, y: sy, vx: view.x, vy: view.y};
-  didPan = false;
+  clearSelection();
 });
 cv.addEventListener('mousemove', function(e) {
+  if (!drag) return;
   const r = cv.getBoundingClientRect();
-  const sx = e.clientX - r.left, sy = e.clientY - r.top;
-  if (drag) {
-    const p = screenToWorld(sx, sy);
-    drag.x = p.x - dragOff.x;
-    drag.y = p.y - dragOff.y;
-    draw();
-    return;
-  }
-  if (pan) {
-    if (Math.hypot(sx - pan.x, sy - pan.y) < 3) return;
-    didPan = true;
-    cv.classList.add('dragging');
-    view.x = pan.vx + sx - pan.x;
-    view.y = pan.vy + sy - pan.y;
-    draw();
-  }
+  drag.x = e.clientX - r.left - dragOff.x;
+  drag.y = e.clientY - r.top - dragOff.y;
+  draw();
 });
-window.addEventListener('mouseup', function() {
-  if (pan && !didPan) clearSelection();
-  drag = null;
-  pan = null;
-  didPan = false;
-  cv.classList.remove('dragging');
-});
-cv.addEventListener('wheel', function(e) {
-  e.preventDefault();
-  const r = cv.getBoundingClientRect();
-  const sx = e.clientX - r.left, sy = e.clientY - r.top;
-  const factor = e.deltaY < 0 ? 1.12 : 0.89;
-  zoomAt(view.scale * factor, sx, sy);
-}, {passive: false});
+cv.addEventListener('mouseup', function() { drag = null; });
 
 function selectItem(type, id) {
   selected = {type, id};
@@ -961,10 +791,11 @@ function confirmNode() {
   };
   const propKey = propKeys[cls] || 'content';
   const id = cls.toLowerCase().slice(0, 3) + '_' + Date.now();
+  const W = cv.width / dpr, H = cv.height / dpr;
   nodes.push({
     id: id, label: cls,
-    x: 80 + Math.random() * Math.max(world.w - 160, 1),
-    y: 80 + Math.random() * Math.max(world.h - 160, 1),
+    x: 60 + Math.random() * (W - 120),
+    y: 60 + Math.random() * (H - 120),
     status: 'found',
     props: propKey ? {[propKey]: txt} : {},
     evidence: []
