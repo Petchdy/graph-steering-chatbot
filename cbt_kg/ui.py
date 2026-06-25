@@ -151,7 +151,17 @@ body { font-family: system-ui, sans-serif; font-size: 14px; background: #fafafa;
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
 .graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: #fff; }
-canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
+canvas { position: absolute; top: 0; left: 0; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+.viewport-toolbar { position: absolute; top: 10px; left: 10px; z-index: 2;
+  display: flex; align-items: center; gap: 4px; padding: 4px;
+  border: 0.5px solid #d1d5db; border-radius: 8px; background: rgba(255,255,255,0.94);
+  box-shadow: 0 8px 24px rgba(15,23,42,0.08); }
+.viewport-toolbar button { min-width: 28px; height: 28px; padding: 0 8px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: #fff; color: #222; cursor: pointer;
+  font-size: 12px; font-weight: 600; line-height: 1; }
+.viewport-toolbar button:hover { background: #f3f4f6; }
+.viewport-toolbar .zoom-readout { min-width: 44px; text-align: center; font-size: 11px; color: #555; }
 .legend { padding: 7px 14px; border-top: 0.5px solid #e5e7eb;
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
   flex-shrink: 0; background: #fff; margin-top: auto; }
@@ -213,6 +223,12 @@ canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
   </div>
   <div class="workspace">
     <div class="graph-panel" id="gp">
+      <div class="viewport-toolbar" aria-label="Graph navigation controls">
+        <button type="button" id="zoomOut" title="Zoom out">-</button>
+        <span class="zoom-readout" id="zoomReadout">100%</span>
+        <button type="button" id="zoomIn" title="Zoom in">+</button>
+        <button type="button" id="zoomFit" title="Fit graph">Fit</button>
+      </div>
       <canvas id="gc"></canvas>
       <div class="legend">
         <div class="leg"><div class="ld" style="background:#E5E7EB;border:1px solid #D1D5DB;"></div>Client</div>
@@ -277,11 +293,26 @@ const RADIUS_RECT_H = 22;
 const RADIUS_RECT_W = 38;
 const ARROW_CLEARANCE = 8;
 const CURVE = 28;
+let world = {w: 900, h: 620};
+let view = {x: 0, y: 0, scale: 1};
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
 
 function applyLayout(W, H) {
   const MARGIN = 48;
   const RIGHT_W = 160;
-  const MAIN_W = W - RIGHT_W - MARGIN * 2;
+  const maxLayerCount = nodes.reduce(function(max, n) {
+    if (RIGHT_SIDE.has(n.label)) return max;
+    const layer = LAYERS[n.label] !== undefined ? LAYERS[n.label] : 6;
+    return Math.max(max, nodes.filter(function(x) {
+      return !RIGHT_SIDE.has(x.label) && (LAYERS[x.label] !== undefined ? LAYERS[x.label] : 6) === layer;
+    }).length);
+  }, 1);
+  world.w = Math.max(W, maxLayerCount * 150 + RIGHT_W + MARGIN * 3, Math.ceil(Math.sqrt(Math.max(nodes.length, 1)) * 230));
+  world.h = Math.max(H, 760, nodes.length * 18 + 520);
+  const MAIN_W = world.w - RIGHT_W - MARGIN * 2;
 
   // Bucket nodes into layer groups and right-side groups
   const layerGroups = {};
@@ -306,7 +337,7 @@ function applyLayout(W, H) {
     const row = layerGroups[l];
     const count = row.length;
     const slotW = MAIN_W / count;
-    const layerH = totalLayers > 1 ? (H - MARGIN * 2) / (totalLayers - 1) : H / 2;
+    const layerH = totalLayers > 1 ? (world.h - MARGIN * 2) / (totalLayers - 1) : world.h / 2;
     const yPos = MARGIN + layerIndex * layerH;
     row.forEach(function(n, i) {
       n.x = MARGIN + slotW * i + slotW / 2;
@@ -320,11 +351,11 @@ function applyLayout(W, H) {
   const rightLabelCount = rightLabelOrder.length;
   rightLabelOrder.forEach(function(label, labelIdx) {
     const group = rightGroups[label];
-    const groupSlotH = rightLabelCount > 0 ? (H - MARGIN * 2) / rightLabelCount : H - MARGIN * 2;
+    const groupSlotH = rightLabelCount > 0 ? (world.h - MARGIN * 2) / rightLabelCount : world.h - MARGIN * 2;
     const slotStart = MARGIN + labelIdx * groupSlotH;
     const itemH = group.length > 1 ? groupSlotH / group.length : groupSlotH;
     group.forEach(function(n, i) {
-      n.x = W - RIGHT_W / 2;
+      n.x = world.w - RIGHT_W / 2;
       n.y = slotStart + itemH * i + itemH / 2;
     });
   });
@@ -369,12 +400,12 @@ function applyLayout(W, H) {
     // Apply forces with layer-aware boundary clamping
     for (const n of nodes) {
       if (RIGHT_SIDE.has(n.label)) {
-        n.x = Math.max(W - RIGHT_W - 10, Math.min(W - 30, n.x + force[n.id].x * step));
-        n.y = Math.max(30, Math.min(H - 30, n.y + force[n.id].y * step));
+        n.x = clamp(n.x + force[n.id].x * step, world.w - RIGHT_W - 10, world.w - 30);
+        n.y = clamp(n.y + force[n.id].y * step, 30, world.h - 30);
       } else {
-        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : H / 2;
-        n.x = Math.max(MARGIN + 20, Math.min(MARGIN + MAIN_W - 20, n.x + force[n.id].x * step));
-        n.y = Math.max(yBase - 25, Math.min(yBase + 25, n.y + force[n.id].y * step));
+        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : world.h / 2;
+        n.x = clamp(n.x + force[n.id].x * step, MARGIN + 20, MARGIN + MAIN_W - 20);
+        n.y = clamp(n.y + force[n.id].y * step, yBase - 42, yBase + 42);
       }
     }
   }
@@ -402,8 +433,50 @@ function resize() {
   if (nodes.length > 0 && w > 50 && h > 50 && nodes.length !== lastNodeCount) {
     applyLayout(w, h);
     lastNodeCount = nodes.length;
+    fitView();
   }
   draw();
+}
+
+function screenToWorld(sx, sy) {
+  return {x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale};
+}
+
+function zoomAt(nextScale, sx, sy) {
+  const before = screenToWorld(sx, sy);
+  view.scale = clamp(nextScale, 0.25, 2.8);
+  view.x = sx - before.x * view.scale;
+  view.y = sy - before.y * view.scale;
+  updateZoomReadout();
+  draw();
+}
+
+function graphBounds() {
+  if (nodes.length === 0) return {minX: 0, minY: 0, maxX: world.w, maxY: world.h};
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x - RADIUS_RECT_W - 28);
+    minY = Math.min(minY, n.y - RADIUS_CIRCLE - 28);
+    maxX = Math.max(maxX, n.x + RADIUS_RECT_W + 28);
+    maxY = Math.max(maxY, n.y + RADIUS_CIRCLE + 28);
+  }
+  return {minX: minX, minY: minY, maxX: maxX, maxY: maxY};
+}
+
+function fitView() {
+  const W = cv.width / dpr, H = cv.height / dpr;
+  const b = graphBounds();
+  const bw = Math.max(b.maxX - b.minX, 1);
+  const bh = Math.max(b.maxY - b.minY, 1);
+  view.scale = clamp(Math.min(W / bw, H / bh), 0.25, 1.15);
+  view.x = (W - (b.minX + b.maxX) * view.scale) / 2;
+  view.y = (H - (b.minY + b.maxY) * view.scale) / 2;
+  updateZoomReadout();
+}
+
+function updateZoomReadout() {
+  const el = document.getElementById('zoomReadout');
+  if (el) el.textContent = Math.round(view.scale * 100) + '%';
 }
 
 // ── Edit-mode toolbar ─────────────────────────────────────────────────────
@@ -417,12 +490,23 @@ if (EDIT_MODE) {
   document.getElementById('btnEdge').addEventListener('click', startEdgeMode);
   document.getElementById('btnSave').addEventListener('click', saveJSON);
 }
+document.getElementById('zoomOut').addEventListener('click', function() {
+  zoomAt(view.scale / 1.18, cv.clientWidth / 2, cv.clientHeight / 2);
+});
+document.getElementById('zoomIn').addEventListener('click', function() {
+  zoomAt(view.scale * 1.18, cv.clientWidth / 2, cv.clientHeight / 2);
+});
+document.getElementById('zoomFit').addEventListener('click', function() {
+  fitView();
+  draw();
+});
 
 // ── State ─────────────────────────────────────────────────────────────────
 let selected = null;
 let edgeMode = false;
 let edgeFrom = null;
 let drag = null, dragOff = {x: 0, y: 0};
+let pan = null;
 
 // ── Drawing ───────────────────────────────────────────────────────────────
 function roundRect(c, x, y, w, h, r) {
@@ -432,6 +516,30 @@ function roundRect(c, x, y, w, h, r) {
   c.lineTo(x+r, y+h); c.arcTo(x, y+h, x, y+h-r, r);
   c.lineTo(x, y+r); c.arcTo(x, y, x+r, y, r);
   c.closePath();
+}
+
+function ellipsize(text, maxWidth) {
+  let value = String(text || '');
+  if (!value) return '';
+  while (value.length > 1 && ctx.measureText(value).width > maxWidth) {
+    value = value.slice(0, -2) + '...';
+  }
+  return value;
+}
+
+function drawTextPill(text, x, y, font, fg, bg, maxWidth) {
+  ctx.font = font;
+  const value = ellipsize(text, maxWidth - 14);
+  if (!value) return;
+  const w = Math.min(maxWidth, Math.max(28, ctx.measureText(value).width + 14));
+  const h = parseInt(font, 10) + 8;
+  ctx.fillStyle = bg;
+  roundRect(ctx, x - w / 2, y - h / 2, w, h, 5);
+  ctx.fill();
+  ctx.fillStyle = fg;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(value, x, y + 0.5);
 }
 
 function nodeAt(x, y) {
@@ -455,14 +563,18 @@ function edgeAt(x, y) {
     const a = nmap[e.from], b = nmap[e.to];
     if (!a || !b) continue;
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    if (Math.hypot(mx - x, my - y) < 16) return e;
+    if (Math.hypot(mx - x, my - y) < 18 / view.scale) return e;
   }
   return null;
 }
 
 function draw() {
   const W = cv.width / dpr, H = cv.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.scale, view.scale);
   const nmap = {};
   for (const n of nodes) nmap[n.id] = n;
 
@@ -475,7 +587,7 @@ function draw() {
     const col = sel ? '#D85A30' : (isFound ? '#1D9E75' : '#bbb');
     ctx.save();
     ctx.strokeStyle = col;
-    ctx.lineWidth = sel ? 2.2 : 1.4;
+    ctx.lineWidth = (sel ? 2.2 : 1.4) / view.scale;
     if (!isFound) ctx.setLineDash([5, 3]);
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.max(Math.hypot(dx, dy), 1);
@@ -503,10 +615,15 @@ function draw() {
     // Edge label at bezier midpoint offset laterally
     const mx = (sx + ex) / 2 + uy * CURVE * 0.5;
     const my = (sy + ey) / 2 - ux * CURVE * 0.5;
-    ctx.font = '9px system-ui,sans-serif';
-    ctx.fillStyle = sel ? '#D85A30' : (isFound ? '#0F6E56' : '#aaa');
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(e.predicate, mx, my - 7);
+    drawTextPill(
+      e.predicate,
+      mx,
+      my - 7,
+      '10px system-ui,sans-serif',
+      sel ? '#A43F1E' : (isFound ? '#0F6E56' : '#64748B'),
+      'rgba(255,255,255,0.88)',
+      132
+    );
     ctx.restore();
   }
 
@@ -527,7 +644,7 @@ function draw() {
 
     ctx.fillStyle = bgCol;
     ctx.strokeStyle = sel ? '#D85A30' : col;
-    ctx.lineWidth = sel ? 2.2 : 1.5;
+    ctx.lineWidth = (sel ? 2.2 : 1.5) / view.scale;
     if (isMissing) ctx.setLineDash([4, 3]);
 
     if (isRect) {
@@ -553,16 +670,24 @@ function draw() {
     ctx.font = '8px system-ui,sans-serif';
     ctx.fillStyle = isMissing ? '#ccc' : col;
     ctx.fillText(shortProp, n.x, n.y + 6);
+    drawTextPill(n.label, n.x, n.y - 8, '11px system-ui,sans-serif',
+      isMissing ? '#64748B' : (BADGE_COLOR[n.label] || '#1F2937'),
+      'rgba(255,255,255,0.78)', isRect ? 68 : 58);
+    drawTextPill(mainProp, n.x, n.y + 7, '9px system-ui,sans-serif',
+      isMissing ? '#64748B' : '#334155',
+      'rgba(255,255,255,0.66)', isRect ? 70 : 58);
 
     ctx.restore();
   }
+  ctx.restore();
 }
 
 // ── Interaction ───────────────────────────────────────────────────────────
 cv.addEventListener('mousedown', function(e) {
   const r = cv.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const n = nodeAt(mx, my);
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const p = screenToWorld(sx, sy);
+  const n = nodeAt(p.x, p.y);
   if (edgeMode) {
     if (n) {
       if (!edgeFrom) { edgeFrom = n.id; draw(); }
@@ -573,19 +698,41 @@ cv.addEventListener('mousedown', function(e) {
     }
     return;
   }
-  if (n) { drag = n; dragOff = {x: mx - n.x, y: my - n.y}; selectItem('node', n.id); return; }
-  const ed = edgeAt(mx, my);
+  if (n) { drag = n; dragOff = {x: p.x - n.x, y: p.y - n.y}; selectItem('node', n.id); return; }
+  const ed = edgeAt(p.x, p.y);
   if (ed) { selectItem('edge', ed.id); return; }
+  pan = {x: sx, y: sy, vx: view.x, vy: view.y};
+  cv.classList.add('dragging');
   clearSelection();
 });
 cv.addEventListener('mousemove', function(e) {
-  if (!drag) return;
   const r = cv.getBoundingClientRect();
-  drag.x = e.clientX - r.left - dragOff.x;
-  drag.y = e.clientY - r.top - dragOff.y;
-  draw();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  if (drag) {
+    const p = screenToWorld(sx, sy);
+    drag.x = p.x - dragOff.x;
+    drag.y = p.y - dragOff.y;
+    draw();
+    return;
+  }
+  if (pan) {
+    view.x = pan.vx + sx - pan.x;
+    view.y = pan.vy + sy - pan.y;
+    draw();
+  }
 });
-cv.addEventListener('mouseup', function() { drag = null; });
+window.addEventListener('mouseup', function() {
+  drag = null;
+  pan = null;
+  cv.classList.remove('dragging');
+});
+cv.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const factor = e.deltaY < 0 ? 1.12 : 0.89;
+  zoomAt(view.scale * factor, sx, sy);
+}, {passive: false});
 
 function selectItem(type, id) {
   selected = {type, id};
@@ -791,11 +938,10 @@ function confirmNode() {
   };
   const propKey = propKeys[cls] || 'content';
   const id = cls.toLowerCase().slice(0, 3) + '_' + Date.now();
-  const W = cv.width / dpr, H = cv.height / dpr;
   nodes.push({
     id: id, label: cls,
-    x: 60 + Math.random() * (W - 120),
-    y: 60 + Math.random() * (H - 120),
+    x: 80 + Math.random() * Math.max(world.w - 160, 1),
+    y: 80 + Math.random() * Math.max(world.h - 160, 1),
     status: 'found',
     props: propKey ? {[propKey]: txt} : {},
     evidence: []
