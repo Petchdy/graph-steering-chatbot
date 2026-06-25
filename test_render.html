@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; font-size: 14px; background: #fafafa; }
+.shell { display: flex; flex-direction: column; height: 610px; background: #fafafa; overflow: hidden; }
+.graph-header { display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; border-bottom: 0.5px solid #e5e7eb; background: #fff; flex-shrink: 0; }
+.graph-title { font-size: 12px; font-weight: 500; color: #555; }
+.graph-actions { display: flex; gap: 6px; align-items: center; }
+.btn-sm { font-size: 11px; padding: 4px 10px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: transparent; cursor: pointer; color: #555; }
+.btn-sm:hover { background: #f3f4f6; }
+.btn-sm.primary { background: #D85A30; color: #fff; border-color: #D85A30; }
+.btn-sm.primary:hover { background: #993C1D; }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #1D9E75;
+  display: inline-block; margin-right: 5px; vertical-align: middle; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
+.graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: #fff; }
+canvas { position: absolute; top: 0; left: 0; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+.viewport-toolbar { position: absolute; top: 10px; left: 10px; z-index: 2;
+  display: flex; align-items: center; gap: 4px; padding: 4px;
+  border: 0.5px solid #d1d5db; border-radius: 8px; background: rgba(255,255,255,0.94);
+  box-shadow: 0 8px 24px rgba(15,23,42,0.08); }
+.viewport-toolbar button { min-width: 28px; height: 28px; padding: 0 8px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: #fff; color: #222; cursor: pointer;
+  font-size: 12px; font-weight: 600; line-height: 1; }
+.viewport-toolbar button:hover { background: #f3f4f6; }
+.viewport-toolbar .zoom-readout { min-width: 44px; text-align: center; font-size: 11px; color: #555; }
+.legend { padding: 7px 14px; border-top: 0.5px solid #e5e7eb;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  flex-shrink: 0; background: #fff; margin-top: auto; }
+.leg { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #777; }
+.ld { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.detail-panel { width: 240px; flex-shrink: 0; display: flex; flex-direction: column;
+  border-left: 0.5px solid #e5e7eb; background: #fff; overflow-y: auto; }
+.dp-header { padding: 10px 14px 8px; border-bottom: 0.5px solid #e5e7eb;
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.dp-title { font-size: 12px; font-weight: 500; color: #222; }
+.dp-close { font-size: 16px; color: #aaa; cursor: pointer; border: none; background: none; padding: 0; }
+.dp-close:hover { color: #222; }
+.dp-empty { padding: 24px 14px; text-align: center; color: #aaa; font-size: 12px; line-height: 1.6; }
+.dp-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.dp-label-badge { display: inline-block; font-size: 10px; font-weight: 500;
+  padding: 2px 8px; border-radius: 20px; margin-bottom: 4px; }
+.dp-field { display: flex; flex-direction: column; gap: 3px; }
+.dp-field label { font-size: 10px; color: #999; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.dp-field input, .dp-field select, .dp-field textarea {
+  font-size: 12px; padding: 5px 8px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: #f9fafb; color: #222;
+  width: 100%; font-family: inherit; resize: none; }
+.dp-field textarea { min-height: 52px; }
+.dp-field input:focus, .dp-field select:focus, .dp-field textarea:focus
+  { outline: none; border-color: #D85A30; }
+.dp-actions { padding: 10px 14px; border-top: 0.5px solid #e5e7eb;
+  display: flex; gap: 6px; flex-shrink: 0; }
+.dp-actions button { flex: 1; font-size: 11px; padding: 6px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: transparent; cursor: pointer; color: #555; }
+.dp-actions button.save { background: #D85A30; color: #fff; border-color: #D85A30; }
+.dp-actions button.del { color: #E24B4A; border-color: #E24B4A; }
+.dp-actions button:hover { filter: brightness(0.92); }
+.create-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3); display: flex; align-items: center;
+  justify-content: center; z-index: 100; }
+.modal-box { background: #fff; border-radius: 10px; border: 0.5px solid #d1d5db;
+  padding: 16px; width: 220px; display: flex; flex-direction: column; gap: 10px; }
+.modal-title { font-size: 13px; font-weight: 500; color: #222; }
+.modal-field { display: flex; flex-direction: column; gap: 4px; }
+.modal-field label { font-size: 10px; color: #999; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.modal-field select, .modal-field input, .modal-field textarea {
+  font-size: 12px; padding: 5px 8px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: #f9fafb; color: #222;
+  width: 100%; font-family: inherit; }
+.modal-field textarea { min-height: 48px; resize: none; }
+.modal-actions { display: flex; gap: 6px; }
+.modal-actions button { flex: 1; font-size: 11px; padding: 6px; border-radius: 6px;
+  border: 0.5px solid #d1d5db; background: transparent; cursor: pointer; color: #555; }
+.modal-actions button.confirm { background: #D85A30; color: #fff; border-color: #D85A30; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="graph-header">
+    <span class="graph-title" id="gTitle"><span class="live-dot"></span>Knowledge graph</span>
+    <div class="graph-actions" id="gActions"></div>
+  </div>
+  <div class="workspace">
+    <div class="graph-panel" id="gp">
+      <div class="viewport-toolbar" aria-label="Graph navigation controls">
+        <button type="button" id="zoomOut" title="Zoom out">-</button>
+        <span class="zoom-readout" id="zoomReadout">100%</span>
+        <button type="button" id="zoomIn" title="Zoom in">+</button>
+        <button type="button" id="zoomFit" title="Fit graph">Fit</button>
+      </div>
+      <canvas id="gc"></canvas>
+      <div class="legend">
+        <div class="leg"><div class="ld" style="background:#E5E7EB;border:1px solid #D1D5DB;"></div>Client</div>
+        <div class="leg"><div class="ld" style="background:#E5E7EB;border:1px solid #D1D5DB;"></div>Session</div>
+        <div class="leg"><div class="ld" style="background:#F87171;border:1px solid #EF4444;border-radius:2px;"></div>Problem</div>
+        <div class="leg"><div class="ld" style="background:#34D399;border:1px solid #10B981;border-radius:2px;"></div>Goal</div>
+        <div class="leg"><div class="ld" style="background:#A78BFA;border:1px solid #8B5CF6;"></div>Intervention</div>
+        <div class="leg"><div class="ld" style="background:#FBBF24;border:1px solid #F59E0B;"></div>Homework</div>
+        <div style="width:100%;height:0;"></div>
+        <div class="leg"><div class="ld" style="background:#9D174D;border:1px solid #831843;"></div>CoreBelief</div>
+        <div class="leg"><div class="ld" style="background:#BE185D;border:1px solid #9D174D;"></div>IntermBelief</div>
+        <div class="leg"><div class="ld" style="background:#FDE047;border:1px solid #FACC15;"></div>Situation</div>
+        <div class="leg"><div class="ld" style="background:#6EE7B7;border:1px solid #34D399;"></div>AutoThought</div>
+        <div class="leg"><div class="ld" style="background:#FCA5A5;border:1px solid #F87171;"></div>Reaction</div>
+        <div class="leg"><div class="ld" style="background:#D1FAE5;border:1px solid #6EE7B7;"></div>AdaptResponse</div>
+        <div style="width:100%;height:0;"></div>
+        <div class="leg"><div class="ld" style="background:#D1D5DB;border:1px solid #9CA3AF;"></div>Utterance</div>
+        <div class="leg"><div style="width:16px;height:1.5px;background:#1D9E75;"></div>Found</div>
+        <div class="leg"><div style="width:16px;height:1.5px;background:repeating-linear-gradient(90deg,#bbb 0,#bbb 3px,transparent 3px,transparent 6px);"></div>Placeholder</div>
+      </div>
+    </div>
+    <div class="detail-panel" id="dp">
+      <div class="dp-header">
+        <span class="dp-title">Inspector</span>
+        <button class="dp-close" onclick="clearSelection()">&#x2715;</button>
+      </div>
+      <div class="dp-empty" id="dpEmpty">Click any node or edge<br>to inspect</div>
+      <div id="dpContent" style="display:none;flex:1;flex-direction:column;">
+        <div class="dp-body" id="dpBody"></div>
+        <div class="dp-actions" id="dpActions" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="create-modal" id="createModal" style="display:none;">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+<script>
+(function() {
+const EDIT_MODE = true;
+const COLOR = {"Client": "#E5E7EB", "Session": "#E5E7EB", "Problem": "#F87171", "missing": "#e0e0e0"};
+const BADGE_BG = {"Client": "#E5E7EB", "Session": "#E5E7EB", "Problem": "#F87171"};
+const BADGE_COLOR = {"Client": "#111827", "Session": "#111827", "Problem": "#7F1D1D"};
+const NODE_CLASSES = ["Problem", "Client", "Session"];
+const PREDICATES = ["hasSession"];
+
+let nodes = [{"id": "a", "label": "Client", "x": 0, "y": 0, "status": "found", "props": {}, "evidence": []}, {"id": "b", "label": "Session", "x": 0, "y": 0, "status": "found", "props": {"sessionType": "therapy"}, "evidence": []}, {"id": "c", "label": "Problem", "x": 0, "y": 0, "status": "found", "props": {"description": "fear of being judged"}, "evidence": []}];
+let edges = [{"id": "e1", "from": "a", "to": "b", "predicate": "hasSession", "status": "found", "props": {}, "evidence": []}];
+
+// ── Layout ──────────────────────────────────────────────────────────────
+const LAYERS = {
+  Client: 0, Session: 1,
+  Problem: 2, Goal: 2,
+  CoreBelief: 3, IntermediateBelief: 3,
+  Situation: 4, AutomaticThought: 4,
+  Reaction: 5, AdaptiveResponse: 5,
+};
+const RIGHT_SIDE = new Set(["Intervention", "Homework"]);
+const RECT_LABELS = new Set(["Problem", "Goal"]);
+const RADIUS_CIRCLE = 28;
+const RADIUS_RECT_H = 22;
+const RADIUS_RECT_W = 38;
+const ARROW_CLEARANCE = 8;
+const CURVE = 28;
+let world = {w: 900, h: 620};
+let view = {x: 0, y: 0, scale: 1};
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function applyLayout(W, H) {
+  const MARGIN = 48;
+  const RIGHT_W = 160;
+  const maxLayerCount = nodes.reduce(function(max, n) {
+    if (RIGHT_SIDE.has(n.label)) return max;
+    const layer = LAYERS[n.label] !== undefined ? LAYERS[n.label] : 6;
+    return Math.max(max, nodes.filter(function(x) {
+      return !RIGHT_SIDE.has(x.label) && (LAYERS[x.label] !== undefined ? LAYERS[x.label] : 6) === layer;
+    }).length);
+  }, 1);
+  world.w = Math.max(W, maxLayerCount * 150 + RIGHT_W + MARGIN * 3, Math.ceil(Math.sqrt(Math.max(nodes.length, 1)) * 230));
+  world.h = Math.max(H, 760, nodes.length * 18 + 520);
+  const MAIN_W = world.w - RIGHT_W - MARGIN * 2;
+
+  // Bucket nodes into layer groups and right-side groups
+  const layerGroups = {};
+  const rightGroups = {};
+  for (const n of nodes) {
+    if (RIGHT_SIDE.has(n.label)) {
+      if (!rightGroups[n.label]) rightGroups[n.label] = [];
+      rightGroups[n.label].push(n);
+    } else {
+      const l = LAYERS[n.label] !== undefined ? LAYERS[n.label] : 6;
+      if (!layerGroups[l]) layerGroups[l] = [];
+      layerGroups[l].push(n);
+    }
+  }
+
+  const mainLayers = Object.keys(layerGroups).map(Number).sort(function(a,b){return a-b;});
+  const totalLayers = mainLayers.length;
+  const nodeBaseY = {};
+
+  // Step 1 — hierarchical slot assignment
+  mainLayers.forEach(function(l, layerIndex) {
+    const row = layerGroups[l];
+    const count = row.length;
+    const slotW = MAIN_W / count;
+    const layerH = totalLayers > 1 ? (world.h - MARGIN * 2) / (totalLayers - 1) : world.h / 2;
+    const yPos = MARGIN + layerIndex * layerH;
+    row.forEach(function(n, i) {
+      n.x = MARGIN + slotW * i + slotW / 2;
+      n.y = yPos;
+      nodeBaseY[n.id] = yPos;
+    });
+  });
+
+  // RIGHT_SIDE: group by label, distribute vertically
+  const rightLabelOrder = Object.keys(rightGroups);
+  const rightLabelCount = rightLabelOrder.length;
+  rightLabelOrder.forEach(function(label, labelIdx) {
+    const group = rightGroups[label];
+    const groupSlotH = rightLabelCount > 0 ? (world.h - MARGIN * 2) / rightLabelCount : world.h - MARGIN * 2;
+    const slotStart = MARGIN + labelIdx * groupSlotH;
+    const itemH = group.length > 1 ? groupSlotH / group.length : groupSlotH;
+    group.forEach(function(n, i) {
+      n.x = world.w - RIGHT_W / 2;
+      n.y = slotStart + itemH * i + itemH / 2;
+    });
+  });
+
+  // Step 2 — spring-force refinement (80 iterations, annealed)
+  for (let iter = 0; iter < 80; iter++) {
+    const step = 0.4 * Math.pow(0.97, iter);
+    const force = {};
+    for (const n of nodes) force[n.id] = {x: 0, y: 0};
+
+    // Repulsion (all pairs)
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.max(Math.hypot(dx, dy), 1);
+        const rep = Math.min(8000 / (dist * dist), 60);
+        const ux = dx / dist, uy = dy / dist;
+        force[a.id].x -= ux * rep;
+        force[a.id].y -= uy * rep * 0.15;
+        force[b.id].x += ux * rep;
+        force[b.id].y += uy * rep * 0.15;
+      }
+    }
+
+    // Attraction along edges
+    const nodeMap = {};
+    for (const n of nodes) nodeMap[n.id] = n;
+    for (const e of edges) {
+      const a = nodeMap[e.from], b = nodeMap[e.to];
+      if (!a || !b) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.max(Math.hypot(dx, dy), 1);
+      const att = (dist - 130) * 0.03;
+      const ux = dx / dist, uy = dy / dist;
+      force[a.id].x += ux * att;
+      force[a.id].y += uy * att;
+      force[b.id].x -= ux * att;
+      force[b.id].y -= uy * att;
+    }
+
+    // Apply forces with layer-aware boundary clamping
+    for (const n of nodes) {
+      if (RIGHT_SIDE.has(n.label)) {
+        n.x = clamp(n.x + force[n.id].x * step, world.w - RIGHT_W - 10, world.w - 30);
+        n.y = clamp(n.y + force[n.id].y * step, 30, world.h - 30);
+      } else {
+        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : world.h / 2;
+        n.x = clamp(n.x + force[n.id].x * step, MARGIN + 20, MARGIN + MAIN_W - 20);
+        n.y = clamp(n.y + force[n.id].y * step, yBase - 42, yBase + 42);
+      }
+    }
+  }
+}
+
+// ── Canvas setup ─────────────────────────────────────────────────────────
+const gp = document.getElementById('gp');
+const cv = document.getElementById('gc');
+const ctx = cv.getContext('2d');
+let dpr = window.devicePixelRatio || 1;
+let lastNodeCount = 0;
+
+function resize() {
+  const rect = gp.getBoundingClientRect();
+  const legendEl = gp.querySelector('.legend');
+  const legendH = legendEl ? legendEl.offsetHeight : 0;
+  const w = Math.max(rect.width, 10);
+  const h = Math.max(rect.height - legendH, 10);
+  cv.style.width = w + 'px';
+  cv.style.height = h + 'px';
+  cv.style.top = '0px';
+  cv.width = w * dpr;
+  cv.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (nodes.length > 0 && w > 50 && h > 50 && nodes.length !== lastNodeCount) {
+    applyLayout(w, h);
+    lastNodeCount = nodes.length;
+    fitView();
+  }
+  draw();
+}
+
+function screenToWorld(sx, sy) {
+  return {x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale};
+}
+
+function zoomAt(nextScale, sx, sy) {
+  const before = screenToWorld(sx, sy);
+  view.scale = clamp(nextScale, 0.25, 2.8);
+  view.x = sx - before.x * view.scale;
+  view.y = sy - before.y * view.scale;
+  updateZoomReadout();
+  draw();
+}
+
+function graphBounds() {
+  if (nodes.length === 0) return {minX: 0, minY: 0, maxX: world.w, maxY: world.h};
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x - RADIUS_RECT_W - 28);
+    minY = Math.min(minY, n.y - RADIUS_CIRCLE - 28);
+    maxX = Math.max(maxX, n.x + RADIUS_RECT_W + 28);
+    maxY = Math.max(maxY, n.y + RADIUS_CIRCLE + 28);
+  }
+  return {minX: minX, minY: minY, maxX: maxX, maxY: maxY};
+}
+
+function fitView() {
+  const W = cv.width / dpr, H = cv.height / dpr;
+  const b = graphBounds();
+  const bw = Math.max(b.maxX - b.minX, 1);
+  const bh = Math.max(b.maxY - b.minY, 1);
+  view.scale = clamp(Math.min(W / bw, H / bh), 0.25, 1.15);
+  view.x = (W - (b.minX + b.maxX) * view.scale) / 2;
+  view.y = (H - (b.minY + b.maxY) * view.scale) / 2;
+  updateZoomReadout();
+}
+
+function updateZoomReadout() {
+  const el = document.getElementById('zoomReadout');
+  if (el) el.textContent = Math.round(view.scale * 100) + '%';
+}
+
+// ── Edit-mode toolbar ─────────────────────────────────────────────────────
+const gActions = document.getElementById('gActions');
+if (EDIT_MODE) {
+  gActions.innerHTML =
+    '<button class="btn-sm" id="btnNode">+ Node</button>' +
+    '<button class="btn-sm" id="btnEdge">+ Edge</button>' +
+    '<button class="btn-sm primary" id="btnSave">Save JSON</button>';
+  document.getElementById('btnNode').addEventListener('click', showCreateNode);
+  document.getElementById('btnEdge').addEventListener('click', startEdgeMode);
+  document.getElementById('btnSave').addEventListener('click', saveJSON);
+}
+document.getElementById('zoomOut').addEventListener('click', function() {
+  zoomAt(view.scale / 1.18, cv.clientWidth / 2, cv.clientHeight / 2);
+});
+document.getElementById('zoomIn').addEventListener('click', function() {
+  zoomAt(view.scale * 1.18, cv.clientWidth / 2, cv.clientHeight / 2);
+});
+document.getElementById('zoomFit').addEventListener('click', function() {
+  fitView();
+  draw();
+});
+
+// ── State ─────────────────────────────────────────────────────────────────
+let selected = null;
+let edgeMode = false;
+let edgeFrom = null;
+let drag = null, dragOff = {x: 0, y: 0};
+let pan = null;
+
+// ── Drawing ───────────────────────────────────────────────────────────────
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x+r, y); c.lineTo(x+w-r, y); c.arcTo(x+w, y, x+w, y+r, r);
+  c.lineTo(x+w, y+h-r); c.arcTo(x+w, y+h, x+w-r, y+h, r);
+  c.lineTo(x+r, y+h); c.arcTo(x, y+h, x, y+h-r, r);
+  c.lineTo(x, y+r); c.arcTo(x, y, x+r, y, r);
+  c.closePath();
+}
+
+function ellipsize(text, maxWidth) {
+  let value = String(text || '');
+  if (!value) return '';
+  while (value.length > 1 && ctx.measureText(value).width > maxWidth) {
+    value = value.slice(0, -2) + '...';
+  }
+  return value;
+}
+
+function drawTextPill(text, x, y, font, fg, bg, maxWidth) {
+  ctx.font = font;
+  const value = ellipsize(text, maxWidth - 14);
+  if (!value) return;
+  const w = Math.min(maxWidth, Math.max(28, ctx.measureText(value).width + 14));
+  const h = parseInt(font, 10) + 8;
+  ctx.fillStyle = bg;
+  roundRect(ctx, x - w / 2, y - h / 2, w, h, 5);
+  ctx.fill();
+  ctx.fillStyle = fg;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(value, x, y + 0.5);
+}
+
+function nodeAt(x, y) {
+  for (const n of nodes) {
+    if (RECT_LABELS.has(n.label)) {
+      if (x >= n.x-RADIUS_RECT_W && x <= n.x+RADIUS_RECT_W && y >= n.y-RADIUS_RECT_H && y <= n.y+RADIUS_RECT_H) return n;
+    }
+  }
+  for (const n of nodes) {
+    if (!RECT_LABELS.has(n.label)) {
+      if (Math.hypot(n.x - x, n.y - y) < RADIUS_CIRCLE) return n;
+    }
+  }
+  return null;
+}
+
+function edgeAt(x, y) {
+  const nmap = {};
+  for (const n of nodes) nmap[n.id] = n;
+  for (const e of edges) {
+    const a = nmap[e.from], b = nmap[e.to];
+    if (!a || !b) continue;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (Math.hypot(mx - x, my - y) < 18 / view.scale) return e;
+  }
+  return null;
+}
+
+function draw() {
+  const W = cv.width / dpr, H = cv.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.scale, view.scale);
+  const nmap = {};
+  for (const n of nodes) nmap[n.id] = n;
+
+  // Draw edges
+  for (const e of edges) {
+    const a = nmap[e.from], b = nmap[e.to];
+    if (!a || !b) continue;
+    const sel = selected && selected.type === 'edge' && selected.id === e.id;
+    const isFound = e.status === 'found';
+    const col = sel ? '#D85A30' : (isFound ? '#1D9E75' : '#bbb');
+    ctx.save();
+    ctx.strokeStyle = col;
+    ctx.lineWidth = (sel ? 2.2 : 1.4) / view.scale;
+    if (!isFound) ctx.setLineDash([5, 3]);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.max(Math.hypot(dx, dy), 1);
+    const ux = dx / dist, uy = dy / dist;
+    const startR = RECT_LABELS.has(a.label) ? RADIUS_RECT_H : RADIUS_CIRCLE;
+    const endR   = RECT_LABELS.has(b.label) ? RADIUS_RECT_H : RADIUS_CIRCLE;
+    const sx = a.x + ux * startR, sy = a.y + uy * startR;
+    const ex = b.x - ux * (endR + ARROW_CLEARANCE), ey = b.y - uy * (endR + ARROW_CLEARANCE);
+    // Bezier control points (lateral offset perpendicular to edge)
+    const cx1 = sx + uy * CURVE, cy1 = sy - ux * CURVE;
+    const cx2 = ex + uy * CURVE, cy2 = ey - ux * CURVE;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.bezierCurveTo(cx1, cy1, cx2, cy2, ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Arrow head using final bezier tangent
+    const ang = Math.atan2(ey - cy2, ex - cx2);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - 9 * Math.cos(ang - 0.4), ey - 9 * Math.sin(ang - 0.4));
+    ctx.lineTo(ex - 9 * Math.cos(ang + 0.4), ey - 9 * Math.sin(ang + 0.4));
+    ctx.closePath(); ctx.fill();
+    // Edge label at bezier midpoint offset laterally
+    const mx = (sx + ex) / 2 + uy * CURVE * 0.5;
+    const my = (sy + ey) / 2 - ux * CURVE * 0.5;
+    drawTextPill(
+      e.predicate,
+      mx,
+      my - 7,
+      '10px system-ui,sans-serif',
+      sel ? '#A43F1E' : (isFound ? '#0F6E56' : '#64748B'),
+      'rgba(255,255,255,0.88)',
+      132
+    );
+    ctx.restore();
+  }
+
+  // Draw nodes
+  for (const n of nodes) {
+    const sel = selected && selected.type === 'node' && selected.id === n.id;
+    const efrom = edgeMode && edgeFrom === n.id;
+    ctx.save();
+    const isMissing = n.status === 'missing';
+    const col = isMissing ? COLOR['missing'] : (COLOR[n.label] || '#aaa');
+    const bgCol = isMissing ? '#F5F5F5' : (BADGE_BG[n.label] || '#eee');
+    const isRect = RECT_LABELS.has(n.label);
+
+    if (sel || efrom) {
+      ctx.shadowColor = efrom ? '#378ADD' : '#D85A30';
+      ctx.shadowBlur = 10;
+    }
+
+    ctx.fillStyle = bgCol;
+    ctx.strokeStyle = sel ? '#D85A30' : col;
+    ctx.lineWidth = (sel ? 2.2 : 1.5) / view.scale;
+    if (isMissing) ctx.setLineDash([4, 3]);
+
+    if (isRect) {
+      roundRect(ctx, n.x - RADIUS_RECT_W, n.y - RADIUS_RECT_H, RADIUS_RECT_W * 2, RADIUS_RECT_H * 2, 6);
+    } else {
+      ctx.beginPath(); ctx.arc(n.x, n.y, RADIUS_CIRCLE, 0, Math.PI * 2);
+    }
+    ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+
+    // Label text
+    const textCol = isMissing ? '#aaa' : (BADGE_COLOR[n.label] || '#333');
+    ctx.fillStyle = textCol;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '9px system-ui,sans-serif';
+    const shortLabel = n.label.length > 13 ? n.label.slice(0, 11) + '…' : n.label;
+    ctx.fillText(shortLabel, n.x, n.y - 7);
+    // Main prop snippet
+    const rawProp = Object.values(n.props || {})[0];
+    const mainProp = rawProp !== undefined && rawProp !== null ? String(rawProp) : (isMissing ? 'missing' : '');
+    const shortProp = mainProp.slice(0, 13) + (mainProp.length > 13 ? '…' : '');
+    ctx.font = '8px system-ui,sans-serif';
+    ctx.fillStyle = isMissing ? '#ccc' : col;
+    ctx.fillText(shortProp, n.x, n.y + 6);
+    drawTextPill(n.label, n.x, n.y - 8, '11px system-ui,sans-serif',
+      isMissing ? '#64748B' : (BADGE_COLOR[n.label] || '#1F2937'),
+      'rgba(255,255,255,0.78)', isRect ? 68 : 58);
+    drawTextPill(mainProp, n.x, n.y + 7, '9px system-ui,sans-serif',
+      isMissing ? '#64748B' : '#334155',
+      'rgba(255,255,255,0.66)', isRect ? 70 : 58);
+
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// ── Interaction ───────────────────────────────────────────────────────────
+cv.addEventListener('mousedown', function(e) {
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const p = screenToWorld(sx, sy);
+  const n = nodeAt(p.x, p.y);
+  if (edgeMode) {
+    if (n) {
+      if (!edgeFrom) { edgeFrom = n.id; draw(); }
+      else if (edgeFrom !== n.id) {
+        showCreateEdge(edgeFrom, n.id);
+        edgeFrom = null; edgeMode = false;
+      }
+    }
+    return;
+  }
+  if (n) { drag = n; dragOff = {x: p.x - n.x, y: p.y - n.y}; selectItem('node', n.id); return; }
+  const ed = edgeAt(p.x, p.y);
+  if (ed) { selectItem('edge', ed.id); return; }
+  pan = {x: sx, y: sy, vx: view.x, vy: view.y};
+  cv.classList.add('dragging');
+  clearSelection();
+});
+cv.addEventListener('mousemove', function(e) {
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  if (drag) {
+    const p = screenToWorld(sx, sy);
+    drag.x = p.x - dragOff.x;
+    drag.y = p.y - dragOff.y;
+    draw();
+    return;
+  }
+  if (pan) {
+    view.x = pan.vx + sx - pan.x;
+    view.y = pan.vy + sy - pan.y;
+    draw();
+  }
+});
+window.addEventListener('mouseup', function() {
+  drag = null;
+  pan = null;
+  cv.classList.remove('dragging');
+});
+cv.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const factor = e.deltaY < 0 ? 1.12 : 0.89;
+  zoomAt(view.scale * factor, sx, sy);
+}, {passive: false});
+
+function selectItem(type, id) {
+  selected = {type, id};
+  draw();
+  if (type === 'node') showNodePanel(nodes.find(n => n.id === id));
+  else showEdgePanel(edges.find(e => e.id === id));
+}
+
+function clearSelection() {
+  selected = null;
+  showEmpty();
+  draw();
+}
+
+function showEmpty() {
+  document.getElementById('dpEmpty').style.display = '';
+  const dc = document.getElementById('dpContent');
+  dc.style.display = 'none';
+}
+
+function renderDP(body, actions) {
+  document.getElementById('dpEmpty').style.display = 'none';
+  const dc = document.getElementById('dpContent');
+  dc.style.display = 'flex';
+  dc.style.flexDirection = 'column';
+  document.getElementById('dpBody').innerHTML = body;
+  const da = document.getElementById('dpActions');
+  if (actions && EDIT_MODE) {
+    da.style.display = 'flex';
+    da.innerHTML = actions;
+  } else {
+    da.style.display = 'none';
+    da.innerHTML = '';
+  }
+}
+
+function showNodePanel(n) {
+  if (!n) return;
+  const bb = BADGE_BG[n.label] || '#eee';
+  const bc = BADGE_COLOR[n.label] || '#333';
+  const statusBg = n.status === 'found' ? '#E1F5EE' : '#f0f0f0';
+  const statusFg = n.status === 'found' ? '#0F6E56' : '#888';
+  const badge = '<span class="dp-label-badge" style="background:' + bb + ';color:' + bc + ';">' + n.label + '</span>';
+  const stag = '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:' + statusBg + ';color:' + statusFg + ';">' + n.status + '</span>';
+  let fields = '<div class="dp-field">' + badge + ' ' + stag + '</div>';
+
+  if (EDIT_MODE) {
+    fields += '<div class="dp-field"><label>Node ID</label><input id="dpId" value="' + esc(n.id) + '" /></div>';
+    fields += '<div class="dp-field"><label>Class</label><select id="dpClass">' +
+      NODE_CLASSES.map(function(c) { return '<option' + (c === n.label ? ' selected' : '') + '>' + c + '</option>'; }).join('') +
+      '</select></div>';
+    fields += '<div class="dp-field"><label>Status</label><select id="dpStatus">' +
+      '<option' + (n.status === 'found' ? ' selected' : '') + '>found</option>' +
+      '<option' + (n.status === 'missing' ? ' selected' : '') + '>missing</option>' +
+      '</select></div>';
+    const propStr = Object.keys(n.props || {}).length > 0 ? JSON.stringify(n.props, null, 1) : '';
+    fields += '<div class="dp-field"><label>Properties (JSON)</label>' +
+      '<textarea id="dpProps" placeholder="{&quot;content&quot;:&quot;...&quot;}">' + esc(propStr) + '</textarea></div>';
+  } else {
+    // Read-only
+    fields += '<div class="dp-field"><label>Node ID</label><input value="' + esc(n.id) + '" readonly /></div>';
+    if (Object.keys(n.props || {}).length > 0) {
+      fields += '<div class="dp-field"><label>Properties</label>' +
+        '<textarea readonly>' + esc(JSON.stringify(n.props, null, 1)) + '</textarea></div>';
+    }
+  }
+  const evidTurns = (n.evidence || []).join(', ') || '—';
+  fields += '<div class="dp-field"><label>Evidence turns</label><input value="' + esc(evidTurns) + '" readonly /></div>';
+
+  renderDP(fields,
+    '<button class="save" onclick="saveNode(&quot;' + esc(n.id) + '&quot;)">Save</button>' +
+    '<button class="del" onclick="deleteNode(&quot;' + esc(n.id) + '&quot;)">Delete</button>'
+  );
+}
+
+function showEdgePanel(e) {
+  if (!e) return;
+  const statusBg = e.status === 'found' ? '#E1F5EE' : '#f0f0f0';
+  const statusFg = e.status === 'found' ? '#0F6E56' : '#888';
+  const stag = '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:' + statusBg + ';color:' + statusFg + ';">' + e.status + '</span>';
+  let fields = '<div class="dp-field"><span style="font-size:11px;font-weight:500;color:#222;">Edge</span> ' + stag + '</div>';
+
+  if (EDIT_MODE) {
+    fields += '<div class="dp-field"><label>Predicate</label><select id="dpPred">' +
+      PREDICATES.map(function(p) { return '<option' + (p === e.predicate ? ' selected' : '') + '>' + p + '</option>'; }).join('') +
+      '</select></div>';
+    fields += '<div class="dp-field"><label>From</label><select id="dpFrom">' +
+      nodes.map(function(n) { return '<option value="' + n.id + '"' + (n.id === e.from ? ' selected' : '') + '>' + n.label + ' (' + n.id + ')</option>'; }).join('') +
+      '</select></div>';
+    fields += '<div class="dp-field"><label>To</label><select id="dpTo">' +
+      nodes.map(function(n) { return '<option value="' + n.id + '"' + (n.id === e.to ? ' selected' : '') + '>' + n.label + ' (' + n.id + ')</option>'; }).join('') +
+      '</select></div>';
+    fields += '<div class="dp-field"><label>Status</label><select id="dpEdgeStatus">' +
+      '<option' + (e.status === 'found' ? ' selected' : '') + '>found</option>' +
+      '<option' + (e.status === 'placeholder' ? ' selected' : '') + '>placeholder</option>' +
+      '</select></div>';
+  } else {
+    fields += '<div class="dp-field"><label>Predicate</label><input value="' + esc(e.predicate) + '" readonly /></div>';
+    fields += '<div class="dp-field"><label>From → To</label><input value="' + esc(e.from + ' → ' + e.to) + '" readonly /></div>';
+  }
+  const evid = (e.evidence || []).join(', ') || '—';
+  fields += '<div class="dp-field"><label>Evidence turns</label><input value="' + esc(evid) + '" readonly /></div>';
+
+  renderDP(fields,
+    '<button class="save" onclick="saveEdge(&quot;' + esc(e.id) + '&quot;)">Save</button>' +
+    '<button class="del" onclick="deleteEdge(&quot;' + esc(e.id) + '&quot;)">Delete</button>'
+  );
+}
+
+function saveNode(id) {
+  const n = nodes.find(function(x) { return x.id === id; });
+  if (!n) return;
+  n.label = document.getElementById('dpClass').value;
+  n.status = document.getElementById('dpStatus').value;
+  try { n.props = JSON.parse(document.getElementById('dpProps').value || '{}'); } catch(err) {}
+  draw(); showNodePanel(n);
+}
+function saveEdge(id) {
+  const e = edges.find(function(x) { return x.id === id; });
+  if (!e) return;
+  e.predicate = document.getElementById('dpPred').value;
+  e.from = document.getElementById('dpFrom').value;
+  e.to = document.getElementById('dpTo').value;
+  e.status = document.getElementById('dpEdgeStatus').value;
+  draw(); showEdgePanel(e);
+}
+function deleteNode(id) {
+  nodes = nodes.filter(function(n) { return n.id !== id; });
+  edges = edges.filter(function(e) { return e.from !== id && e.to !== id; });
+  clearSelection(); draw();
+}
+function deleteEdge(id) {
+  edges = edges.filter(function(e) { return e.id !== id; });
+  clearSelection(); draw();
+}
+
+// ── Edge creation ─────────────────────────────────────────────────────────
+let edgeModeTimeout = null;
+function startEdgeMode() {
+  edgeMode = true; edgeFrom = null;
+  const t = document.getElementById('gTitle');
+  t.innerHTML = 'Click source node, then target node…';
+  if (edgeModeTimeout) clearTimeout(edgeModeTimeout);
+  edgeModeTimeout = setTimeout(function() {
+    edgeMode = false; edgeFrom = null;
+    updateTitle();
+  }, 10000);
+}
+
+function showCreateEdge(fromId, toId) {
+  if (edgeModeTimeout) clearTimeout(edgeModeTimeout);
+  updateTitle();
+  const m = document.getElementById('createModal');
+  const b = document.getElementById('modalBox');
+  b.innerHTML =
+    '<div class="modal-title">Add edge</div>' +
+    '<div class="modal-field"><label>From</label><input value="' + esc(fromId) + '" readonly/></div>' +
+    '<div class="modal-field"><label>To</label><input value="' + esc(toId) + '" readonly/></div>' +
+    '<div class="modal-field"><label>Predicate</label><select id="mPred">' +
+    PREDICATES.map(function(p) { return '<option>' + p + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="modal-actions">' +
+    '<button onclick="closeModal()">Cancel</button>' +
+    '<button class="confirm" onclick="confirmEdge(&quot;' + esc(fromId) + '&quot;,&quot;' + esc(toId) + '&quot;)">Add</button>' +
+    '</div>';
+  m.style.display = 'flex';
+}
+
+function confirmEdge(from, to) {
+  const pred = document.getElementById('mPred').value;
+  const id = 'e' + Date.now();
+  edges.push({id: id, from: from, to: to, predicate: pred, status: 'found', evidence: [], props: {}});
+  closeModal(); updateTitle(); draw();
+}
+
+// ── Node creation ─────────────────────────────────────────────────────────
+function showCreateNode() {
+  const m = document.getElementById('createModal');
+  const b = document.getElementById('modalBox');
+  b.innerHTML =
+    '<div class="modal-title">Add node</div>' +
+    '<div class="modal-field"><label>Class</label><select id="mClass">' +
+    NODE_CLASSES.map(function(c) { return '<option>' + c + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="modal-field"><label>Main text / content</label>' +
+    '<textarea id="mText" placeholder="e.g. I will never succeed"></textarea></div>' +
+    '<div class="modal-actions">' +
+    '<button onclick="closeModal()">Cancel</button>' +
+    '<button class="confirm" onclick="confirmNode()">Add</button>' +
+    '</div>';
+  m.style.display = 'flex';
+}
+
+function confirmNode() {
+  const cls = document.getElementById('mClass').value;
+  const txt = document.getElementById('mText').value;
+  const propKeys = {
+    Problem: 'description', Goal: 'statement', CoreBelief: 'content',
+    IntermediateBelief: 'content', Situation: 'description',
+    AutomaticThought: 'content', Reaction: 'content',
+    AdaptiveResponse: 'content', Intervention: 'description',
+    Homework: 'taskDescription', Client: '', Session: ''
+  };
+  const propKey = propKeys[cls] || 'content';
+  const id = cls.toLowerCase().slice(0, 3) + '_' + Date.now();
+  nodes.push({
+    id: id, label: cls,
+    x: 80 + Math.random() * Math.max(world.w - 160, 1),
+    y: 80 + Math.random() * Math.max(world.h - 160, 1),
+    status: 'found',
+    props: propKey ? {[propKey]: txt} : {},
+    evidence: []
+  });
+  closeModal(); updateTitle(); draw();
+}
+
+// ── Save JSON ─────────────────────────────────────────────────────────────
+function saveJSON() {
+  const data = JSON.stringify({nodes: nodes, edges: edges}, null, 2);
+  const blob = new Blob([data], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cbt_graph.json'; a.click();
+}
+
+function closeModal() {
+  document.getElementById('createModal').style.display = 'none';
+}
+
+function updateTitle() {
+  const t = document.getElementById('gTitle');
+  t.innerHTML = '<span class="live-dot"></span>Knowledge graph · ' +
+    nodes.length + ' nodes · ' + edges.length + ' edges';
+}
+
+function esc(s) {
+  if (s === undefined || s === null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// ── Expose globals for inline onclick ─────────────────────────────────────
+window.saveNode = saveNode; window.saveEdge = saveEdge;
+window.deleteNode = deleteNode; window.deleteEdge = deleteEdge;
+window.confirmEdge = confirmEdge; window.confirmNode = confirmNode;
+window.closeModal = closeModal; window.clearSelection = clearSelection;
+
+new ResizeObserver(resize).observe(gp);
+resize();
+updateTitle();
+})();
+</script>
+</body>
+</html>

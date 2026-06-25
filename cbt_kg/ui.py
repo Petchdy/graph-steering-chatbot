@@ -507,6 +507,7 @@ let edgeMode = false;
 let edgeFrom = null;
 let drag = null, dragOff = {x: 0, y: 0};
 let pan = null;
+let didPan = false;
 
 // ── Drawing ───────────────────────────────────────────────────────────────
 function roundRect(c, x, y, w, h, r) {
@@ -543,14 +544,16 @@ function drawTextPill(text, x, y, font, fg, bg, maxWidth) {
 }
 
 function nodeAt(x, y) {
+  const hitPad = Math.max(0, 10 / view.scale - 4);
   for (const n of nodes) {
     if (RECT_LABELS.has(n.label)) {
-      if (x >= n.x-RADIUS_RECT_W && x <= n.x+RADIUS_RECT_W && y >= n.y-RADIUS_RECT_H && y <= n.y+RADIUS_RECT_H) return n;
+      if (x >= n.x - RADIUS_RECT_W - hitPad && x <= n.x + RADIUS_RECT_W + hitPad &&
+          y >= n.y - RADIUS_RECT_H - hitPad && y <= n.y + RADIUS_RECT_H + hitPad) return n;
     }
   }
   for (const n of nodes) {
     if (!RECT_LABELS.has(n.label)) {
-      if (Math.hypot(n.x - x, n.y - y) < RADIUS_CIRCLE) return n;
+      if (Math.hypot(n.x - x, n.y - y) < RADIUS_CIRCLE + hitPad) return n;
     }
   }
   return null;
@@ -562,8 +565,24 @@ function edgeAt(x, y) {
   for (const e of edges) {
     const a = nmap[e.from], b = nmap[e.to];
     if (!a || !b) continue;
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    if (Math.hypot(mx - x, my - y) < 18 / view.scale) return e;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.max(Math.hypot(dx, dy), 1);
+    const ux = dx / dist, uy = dy / dist;
+    const startR = RECT_LABELS.has(a.label) ? RADIUS_RECT_H : RADIUS_CIRCLE;
+    const endR = RECT_LABELS.has(b.label) ? RADIUS_RECT_H : RADIUS_CIRCLE;
+    const sx = a.x + ux * startR, sy = a.y + uy * startR;
+    const ex = b.x - ux * (endR + ARROW_CLEARANCE), ey = b.y - uy * (endR + ARROW_CLEARANCE);
+    const cx1 = sx + uy * CURVE, cy1 = sy - ux * CURVE;
+    const cx2 = ex + uy * CURVE, cy2 = ey - ux * CURVE;
+    let best = Infinity;
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16;
+      const mt = 1 - t;
+      const px = mt * mt * mt * sx + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * ex;
+      const py = mt * mt * mt * sy + 3 * mt * mt * t * cy1 + 3 * mt * t * t * cy2 + t * t * t * ey;
+      best = Math.min(best, Math.hypot(px - x, py - y));
+    }
+    if (best < Math.max(16, 22 / view.scale)) return e;
   }
   return null;
 }
@@ -702,8 +721,7 @@ cv.addEventListener('mousedown', function(e) {
   const ed = edgeAt(p.x, p.y);
   if (ed) { selectItem('edge', ed.id); return; }
   pan = {x: sx, y: sy, vx: view.x, vy: view.y};
-  cv.classList.add('dragging');
-  clearSelection();
+  didPan = false;
 });
 cv.addEventListener('mousemove', function(e) {
   const r = cv.getBoundingClientRect();
@@ -716,14 +734,19 @@ cv.addEventListener('mousemove', function(e) {
     return;
   }
   if (pan) {
+    if (Math.hypot(sx - pan.x, sy - pan.y) < 3) return;
+    didPan = true;
+    cv.classList.add('dragging');
     view.x = pan.vx + sx - pan.x;
     view.y = pan.vy + sy - pan.y;
     draw();
   }
 });
 window.addEventListener('mouseup', function() {
+  if (pan && !didPan) clearSelection();
   drag = null;
   pan = null;
+  didPan = false;
   cv.classList.remove('dragging');
 });
 cv.addEventListener('wheel', function(e) {
