@@ -14,6 +14,13 @@ Tier A (every client turn — runs in background asyncio Task):
                    turn's new nodes as subject. Covers every ANCHOR_FAMILIES relation, e.g.
                    triggers/leadsTo/stemsFrom/manifestsAs/hasAdaptiveResponse/becomesSituation
                    — whatever fires depends on which compatible object nodes already exist.
+  6. RETRY       — a node only ever gets to be a relation SUBJECT on the turn it's created;
+                   an old node whose only relation needed an object that didn't exist yet at
+                   its own turn is otherwise stuck forever. Targeted, cheap fix: for each new
+                   node this turn, BFS outward through existing edges (bounded hops) to find
+                   old "orphan" nodes (no outgoing relation yet) in the same structural
+                   neighborhood whose class could plausibly point at the new node, and retry
+                   just those — not a full-graph scan, same cheap window context as step 5.
 
 Tier B (every CONSOLIDATE_EVERY turns; reset/session-end):
   1. SESSION-LEVEL — V4_flat Stage 1.1 over whole transcript (Problem, Goal, Intervention,
@@ -41,7 +48,7 @@ import time
 from .interfaces import GraphStore
 from .ontology import (ANCHOR_FAMILIES, CLASS_DEFINITIONS, CORE_BELIEF_DOMAINS,
                        DISTORTION_TYPES, EXTRACT_CLASSES, HOMEWORK_TASKTYPES,
-                       IB_SUBTYPES, PROBLEM_DOMAINS, REACTION_CHANNELS,
+                       IB_SUBTYPES, OBJECT_EDGES, PROBLEM_DOMAINS, REACTION_CHANNELS,
                        SELF_CB_CATEGORIES, SITUATION_KINDS, SPEAKER_PRIOR,
                        SUBCLASS_GLOSS, TECHNIQUES, TEXT_PROP,
                        emotion_valence_from_text, temporality_from_text)
@@ -213,6 +220,19 @@ class TurnPipeline:
             edges_added = self._resolve_local_edges(new_nodes, graph, window, turn_index)
         except Exception as exc:
             print(f"[extract] stage3 failed: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+
+        # 6. Targeted retry for old ("orphan") nodes a new node this turn might now
+        # connect to. Traces the graph outward from the new node (bounded BFS) instead
+        # of scanning the whole graph; falls back to a flat orphan scan only when the
+        # new node has no edges yet to trace from. Same cheap window context as step 5.
+        try:
+            handled_ids = {n.node_id for n in new_nodes}
+            unblocked = self._unblocked_subjects(graph, new_nodes, handled_ids)
+            if unblocked:
+                edges_added += self._resolve_local_edges(unblocked, graph, window, turn_index)
+        except Exception as exc:
+            print(f"[extract] targeted rescan failed: {type(exc).__name__}: {exc}",
                   file=sys.stderr)
 
         return {
@@ -446,6 +466,67 @@ class TurnPipeline:
                 c["props"].setdefault("kind", "externalSituation")
             if c["label"] == "AutomaticThought":
                 c["props"].setdefault("modality", "verbal")
+
+    # ── Step 6: TARGETED RETRY (orphans within a bounded graph-path neighborhood) ──
+
+    def _is_orphan(self, graph: GraphStore, node) -> bool:
+        """True if node's class could have an outgoing safe-predicate edge, but doesn't yet."""
+        if node.label not in ANCHOR_FAMILIES:
+            return False
+        return not any(
+            e.status == "found" and e.subject_id == node.node_id
+            and e.predicate in PER_TURN_SAFE_PREDICATES
+            for e in graph.edges()
+        )
+
+    def _bfs_reachable(self, graph: GraphStore, start_id: str, max_hops: int) -> set:
+        """Node ids reachable from start_id within max_hops, walking found edges in
+        either direction. Cheap in-memory BFS — these graphs run to tens of nodes."""
+        found_edges = [e for e in graph.edges() if e.status == "found"]
+        visited = {start_id}
+        frontier = {start_id}
+        for _ in range(max_hops):
+            next_frontier = set()
+            for e in found_edges:
+                if e.subject_id in frontier and e.object_id not in visited:
+                    next_frontier.add(e.object_id)
+                if e.object_id in frontier and e.subject_id not in visited:
+                    next_frontier.add(e.subject_id)
+            if not next_frontier:
+                break
+            visited |= next_frontier
+            frontier = next_frontier
+        visited.discard(start_id)
+        return visited
+
+    def _unblocked_subjects(self, graph: GraphStore, new_nodes, exclude_ids: set,
+                            max_hops: int = 2) -> list:
+        """Old nodes that could now form a new relation to one of this turn's new nodes.
+
+        Traces the graph outward (BFS, up to max_hops) from each new node to find a
+        structurally-relevant neighborhood, then filters to orphans within it whose
+        class could plausibly point at the new node (per ontology.OBJECT_EDGES). Falls
+        back to a flat whole-graph orphan scan when the new node has no edges yet —
+        early in a session there's no structure to trace, so the conservative fallback
+        is correct rather than silently finding nothing.
+        """
+        by_id = {n.node_id: n for n in graph.nodes() if n.status == "found"}
+        candidates: list = []
+        seen_ids: set = set()
+        for new_node in new_nodes:
+            subj_labels = {s for (_pred, s) in OBJECT_EDGES.get(new_node.label, [])}
+            if not subj_labels:
+                continue
+            reachable = self._bfs_reachable(graph, new_node.node_id, max_hops)
+            pool = [by_id[nid] for nid in reachable if nid in by_id] or list(by_id.values())
+            for n in pool:
+                if (n.node_id in exclude_ids or n.node_id in seen_ids
+                        or n.label not in subj_labels):
+                    continue
+                if self._is_orphan(graph, n):
+                    candidates.append(n)
+                    seen_ids.add(n.node_id)
+        return candidates
 
     # ── Step 5: LOCAL EDGES ────────────────────────────────────────────
 
