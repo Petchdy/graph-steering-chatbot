@@ -1,0 +1,24 @@
+{
+  "layer": 19,
+  "typical_norm": 43.35194778442383,
+  "strategies": [
+    "Question",
+    "Affirmation and Reassurance",
+    "Self-disclosure",
+    "Reflection of feelings",
+    "Info+Suggest"
+  ],
+  "alphas": {
+    "Question": 0.5,
+    "Affirmation and Reassurance": 0.75,
+    "Self-disclosure": 0.5,
+    "Reflection of feelings": 0.5,
+    "Info+Suggest": 0.5
+  },
+  "gen": {
+    "repetition_penalty": 1.3,
+    "no_repeat_ngram_size": 3,
+    "note": "judge-picked alphas (rep-control on)",
+    "question_prompt_nudge": true
+  }
+}

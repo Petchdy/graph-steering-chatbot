@@ -3,6 +3,7 @@
 .venv/
 venv/
 cbt_kg/chat-bot-env
+cbt-conda/
 
 # Python
 __pycache__/

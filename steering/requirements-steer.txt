@@ -1,0 +1,10 @@
+# Steering microservice only (NOT needed by the base chatbot). Install into a separate venv:
+#   python -m venv steering/steer-env && source steering/steer-env/bin/activate
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r steering/requirements-steer.txt
+transformers>=4.51
+accelerate>=0.30
+bitsandbytes>=0.43
+numpy
+fastapi
+uvicorn[standard]

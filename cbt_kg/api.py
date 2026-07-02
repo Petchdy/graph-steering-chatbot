@@ -44,6 +44,7 @@ def _get_or_create_session(session_id: str) -> Session:
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    strategy: Optional[str] = None   # steering strategy for this turn (GENERATOR=steered); None = leave as-is
 
 
 class ChatResponse(BaseModel):
@@ -63,6 +64,8 @@ class ResetRequest(BaseModel):
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
     session = _get_or_create_session(req.session_id)
+    if req.strategy is not None and hasattr(session.generator, "set_strategy"):
+        session.generator.set_strategy(req.strategy)   # manual steering button
     result = await async_turn(session, req.message)
     return ChatResponse(
         reply=result["reply"],
@@ -73,6 +76,20 @@ async def chat(req: ChatRequest) -> ChatResponse:
         new_edges=[list(e) for e in result.get("new_edges", [])],
         graph_snapshot=result.get("graph_snapshot", {}),
     )
+
+
+@app.get("/strategies")
+def strategies() -> dict:
+    """Offered steering strategies (proxied from the steering service). 'none' always available."""
+    import os
+    import requests
+    try:
+        r = requests.get(os.environ.get("STEER_URL", "http://localhost:8100") + "/strategies", timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        return {"strategies": ["none"] + list(data.get("strategies", [])), "alphas": data.get("alphas", {})}
+    except Exception:  # noqa: BLE001 — service down / not steered mode
+        return {"strategies": ["none"], "alphas": {}}
 
 
 @app.post("/reset")

@@ -857,13 +857,18 @@ def _render_canvas(
 # Session bar HTML helper
 # ─────────────────────────────────────────────────────────────────────────
 
-def _session_bar_html(phase: str, technique: str, turn_count: int) -> str:
+def _session_bar_html(phase: str, technique: str, turn_count: int, strategy: str = "none") -> str:
+    steer = ""
+    if strategy and strategy != "none":
+        steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
+                 f'background:#FDECEC;color:#B4232A;">steer: {html.escape(strategy)}</span>')
     return (
         '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
         f'<span style="font-size:11px;font-weight:500;padding:3px 10px;border-radius:20px;'
         f'background:#E6F1FB;color:#185FA5;">{html.escape(phase)}</span>'
         f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
         f'border:0.5px solid #d1d5db;color:#666;">{html.escape(technique)}</span>'
+        f'{steer}'
         f'<span style="font-size:11px;color:#aaa;margin-left:auto;">Turn {turn_count}</span>'
         '</div>'
     )
@@ -887,14 +892,16 @@ def _add_user(message: str, history: list):
     return history + [{"role": "user", "content": message}], "", message
 
 
-def _bot_respond(message: str, history: list, session: Session):
+def _bot_respond(message: str, history: list, session: Session, strategy: str = "none"):
     if session is None:
         session = _new_session()
+    if hasattr(session.generator, "set_strategy"):   # manual steering button (GENERATOR=steered)
+        session.generator.set_strategy(strategy)
     result = turn(session, message)
     history = history + [{"role": "assistant", "content": result["reply"]}]
     phase = result["phase"]
     technique = result["technique"]
-    bar_html = _session_bar_html(phase, technique, session.turn_count)
+    bar_html = _session_bar_html(phase, technique, session.turn_count, strategy)
     nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges())
     graph_html = _render_canvas(nodes, edges, edit_mode=False)
     return history, session, bar_html, graph_html
@@ -1039,6 +1046,12 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                             scale=5,
                         )
                         send_btn = gr.Button("Send", variant="primary", scale=1)
+                    strategy_dd = gr.Dropdown(
+                        choices=["none", "Question", "Affirmation and Reassurance",
+                                 "Self-disclosure", "Reflection of feelings", "Info+Suggest"],
+                        value="none", label="Steering strategy",
+                        info="Manually steer the therapist's next reply (needs GENERATOR=steered).",
+                    )
                     reset_btn = gr.Button("New session")
 
                 # Right column: live graph
@@ -1050,12 +1063,12 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
             send_btn.click(
                 _add_user, [msg_box, chatbot], [chatbot, msg_box, pending_msg]
             ).then(
-                _bot_respond, [pending_msg, chatbot, session_state], therapy_outputs
+                _bot_respond, [pending_msg, chatbot, session_state, strategy_dd], therapy_outputs
             )
             msg_box.submit(
                 _add_user, [msg_box, chatbot], [chatbot, msg_box, pending_msg]
             ).then(
-                _bot_respond, [pending_msg, chatbot, session_state], therapy_outputs
+                _bot_respond, [pending_msg, chatbot, session_state, strategy_dd], therapy_outputs
             )
             reset_btn.click(_reset_therapy, [], therapy_outputs)
             demo.load(_reset_therapy, [], therapy_outputs)

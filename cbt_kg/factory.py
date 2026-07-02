@@ -51,6 +51,18 @@ def make_generator() -> Generator:
         return OpenRouterGenerator(
             model=os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-6"),
         )
+    if kind == "steered":
+        # Steering overlay: reply steered by the local service; CBT technique/phase from Ollama.
+        from steering.steered_generator import SteeredRemoteGenerator
+        return SteeredRemoteGenerator(
+            steer_url=os.environ.get("STEER_URL", "http://localhost:8100"),
+            fallback=LocalLLMGenerator(
+                model=os.environ.get("LOCAL_LLM_MODEL",
+                                     os.environ.get("OLLAMA_MODEL", "qwen3.5-nothink")),
+                base_url=os.environ.get("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1"),
+            ),
+            default_strategy=os.environ.get("STEER_DEFAULT_STRATEGY", "none"),
+        )
     if kind == "local":
         return LocalLLMGenerator(
             model=os.environ.get("LOCAL_LLM_MODEL",
