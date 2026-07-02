@@ -87,8 +87,12 @@ CLASS_DEFINITIONS: dict[str, str] = {
         "A conditional or instrumental belief sitting between core beliefs and automatic "
         "thoughts: a RULE ('I must always do my best'), an ASSUMPTION ('if I ask for help, "
         "people think I'm incompetent'), or an ATTITUDE ('it's terrible to fail'). It is "
-        "marked by 'must / should / have to' or 'if ... then ...'. It is NOT an absolute "
-        "identity claim like 'I am worthless' (that is a CoreBelief)."
+        "marked by a should-type standard the client holds themselves to — 'must / should / "
+        "have to / supposed to / meant to / ought to / expected to' — or an 'if ... then ...' "
+        "condition. This includes standards phrased as a present failure to meet them (e.g. "
+        "'I can't do what I'm supposed to be able to' IS the rule 'I should be able to do "
+        "this', not a one-off thought). It is NOT an absolute identity claim like 'I am "
+        "worthless' (that is a CoreBelief)."
     ),
     "Situation": ("A SINGLE, concrete, time-bound moment that triggered a specific "
                   "automatic thought. The first link of a Situation→AutomaticThought→"
@@ -96,9 +100,13 @@ CLASS_DEFINITIONS: dict[str, str] = {
                   "thought to this exact moment? → Situation."),
     "AutomaticThought": (
         "A spontaneous, situation-specific thought tied to ONE moment — e.g. 'he didn't "
-        "text back, he's angry at me'. It is NOT a general rule ('I must ...' = "
+        "text back, he's angry at me'. It is NOT a general rule or should-type standard "
+        "('I must / should / have to / am supposed to / am meant to ...' = "
         "IntermediateBelief) and NOT an absolute identity claim ('I am worthless' = "
-        "CoreBelief). Keep emotions OUT of the content (a feeling is a Reaction)."
+        "CoreBelief). Before labeling something AutomaticThought, check first whether it "
+        "expresses a standard the client holds themselves to (→ IntermediateBelief) rather "
+        "than a reaction tied to one specific moment. Keep emotions OUT of the content (a "
+        "feeling is a Reaction)."
     ),
     "Reaction": ("The client's response to an automatic thought — a feeling, an "
                  "action/avoidance, or a body sensation."),
@@ -181,6 +189,8 @@ NODE_CLASSES: list[dict] = [
     }},
     {"label": "Situation", "multi": True, "props": {
         "description": "string",
+        "context":     "string (optional) — elaboration: where/who/circumstances, "
+                       "informational only, carries no edges",
         "kind":        "enum: externalSituation | thoughtStream | image | "
                        "emotion | behavior | physiological",
         "temporality": "enum: past | present | anticipated (optional)",
