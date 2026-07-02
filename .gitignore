@@ -4,6 +4,7 @@
 venv/
 cbt_kg/chat-bot-env
 cbt-conda/
+steering/myenv/
 
 # Python
 __pycache__/

@@ -103,7 +103,7 @@ EXTRACT_CLASSES: list[str] = [
 ]
 # (Client / Session / Utterance are scaffold, not extracted. Diagnosis removed.)
 
-# Per-class extraction definition (lifted from cbt_kg_extraction_descriptions_V4.md)
+# Per-class extraction definition (lifted from cbt_kg_extraction_descriptions_V4_flat.md)
 CLASS_DEFINITIONS: dict[str, str] = {
     "Problem": ("A GENERAL, ongoing area of difficulty — the kind of thing that "
                 "would be a heading on a session agenda (\"trouble making friends\", "
@@ -130,10 +130,12 @@ CLASS_DEFINITIONS: dict[str, str] = {
         "marked by 'must / should / have to' or 'if ... then ...'. It is NOT an absolute "
         "identity claim like 'I am worthless' (that is a CoreBelief)."
     ),
-    "Situation": ("A SINGLE, concrete, time-bound moment that triggered a specific "
-                  "automatic thought. The first link of a Situation→AutomaticThought→"
-                  "Reaction chain. Test: can you attach ONE specific automatic "
-                  "thought to this exact moment? → Situation."),
+    "Situation": ("A single concrete moment that triggered a specific automatic thought. "
+                  "Emit \"text\" = the MINIMAL trigger in one short phrase (what happened / "
+                  "the stimulus). If the client elaborates (where they were, who they were "
+                  "with, the circumstances, the sequence of events), ALSO emit \"context\" = "
+                  "that elaboration. If there is no elaboration, omit \"context\". "
+                  "Do NOT put the elaboration in \"text\" — keep \"text\" short."),
     "AutomaticThought": (
         "A spontaneous, situation-specific thought tied to ONE moment — e.g. 'he didn't "
         "text back, he's angry at me'. It is NOT a general rule ('I must ...' = "
@@ -184,7 +186,7 @@ SUBCLASS_RULES: dict[str, dict[str, str]] = {
     "Problem": {"academic": "AcademicProblem", "work": "WorkProblem",
                 "social": "SocialProblem", "family": "FamilyProblem",
                 "financial": "FinancialProblem", "health": "HealthProblem",
-                "other": "OtherProblem"},
+                "personal": "PersonalProblem", "other": "OtherProblem"},
     "CoreBelief": {"self": "SelfCoreBelief", "world": "WorldCoreBelief",
                    "others": "OthersCoreBelief"},
     "IntermediateBelief": {"attitude": "Attitude", "rule": "Rule",
@@ -203,6 +205,8 @@ SUBCLASS_GLOSS: dict[str, dict[str, str]] = {
         "family": "parents, siblings, partner, children",
         "financial": "money, debt, finances",
         "health": "physical or mental health (incl. depression/anxiety)",
+        "personal": ("self-concept, identity, meaning, purpose, existential concerns "
+                     "(the client's relationship with themselves, not the world/others)"),
         "other": "cross-domain, unclear, or fits no other category",
     },
     "CoreBelief": {
@@ -242,7 +246,7 @@ GROUP_KEY_PROP: dict[str, str] = {
 }
 
 # Property-value enums (mirror the SUBCLASS_RULES vocabularies).
-PROBLEM_DOMAINS     = ("academic", "work", "social", "family", "financial", "health", "other")
+PROBLEM_DOMAINS     = ("academic", "work", "social", "family", "financial", "health", "personal", "other")
 CORE_BELIEF_DOMAINS = ("self", "world", "others")
 IB_SUBTYPES         = ("attitude", "rule", "assumption")
 REACTION_CHANNELS   = ("emotional", "behavioral", "physiological")
@@ -256,9 +260,12 @@ SITUATION_KINDS: dict[str, str] = {
     "externalSituation": "a real external event/circumstance (incl. a recalled past event)",
     "thoughtStream": "a vague worry-spiral; the extracted thought is its conclusion",
     "image": "a mental picture that arose unbidden",
-    "emotion": "an emotion that itself triggered the thought (first link in the chain)",
-    "behavior": "an action that triggered the thought (first link in the chain)",
-    "physiological": "a body sensation that triggered the thought (first link in the chain)",
+    "emotion": ("an emotion that triggered the thought — first link in the chain, OR the "
+                "re-entry point of a cascade (a reaction that became a new trigger)"),
+    "behavior": ("an action that triggered the thought — first link in the chain, OR a "
+                 "cascade re-entry point"),
+    "physiological": ("a body sensation that triggered the thought — first link in the "
+                      "chain, OR a cascade re-entry point"),
 }
 
 DISTORTION_TYPES: dict[str, str] = {
@@ -318,6 +325,11 @@ ANCHOR_FAMILIES: dict[str, list[tuple[str, str, str]]] = {
     "Situation": [
         ("triggers", "AutomaticThought",
          "this situation sparked that automatic thought"),
+        ("triggers", "Reaction",
+         "this situation produced that reaction DIRECTLY, with no thought in between — "
+         "use ONLY for a reflexive/pre-cognitive response (startle, immediate disgust or "
+         "grief). If a thought came first, do NOT use this; the reaction belongs to the "
+         "thought via leadsTo."),
     ],
     "AutomaticThought": [
         ("leadsTo", "Reaction",
@@ -339,9 +351,15 @@ ANCHOR_FAMILIES: dict[str, list[tuple[str, str, str]]] = {
          "this belief shapes how the client perceived that situation"),
     ],
     "Reaction": [
+        ("leadsTo", "Reaction",
+         "this reaction led to that next reaction in the SAME episode, as an explicit "
+         "ordered sequence (scared -> goosebumps -> fled). Use ONLY when the transcript "
+         "shows the order. If the reactions are independent responses to the same thought, "
+         "do NOT link them — leave them parallel."),
         ("becomesSituation", "Situation",
-         "this reaction itself became the trigger for a new thought (cascade) — only "
-         "if the transcript clearly shows it"),
+         "this reaction itself became the trigger for a NEW thought (panic loop) — only "
+         "if the transcript clearly shows the client noticing the reaction and a new "
+         "thought following"),
     ],
     "Problem": [
         ("manifestsAs", "Situation",

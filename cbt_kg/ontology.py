@@ -329,6 +329,10 @@ ANCHOR_FAMILIES: dict[str, list[tuple[str, str, str]]] = {
     "Situation": [
         ("triggers", "AutomaticThought",
          "this situation sparked that automatic thought"),
+        ("triggers", "Reaction",
+         "this situation produced that reaction DIRECTLY with no thought in between — "
+         "use ONLY for reflexive/pre-cognitive responses (startle, immediate disgust, grief); "
+         "if a thought came first, the reaction belongs to the thought via leadsTo instead"),
     ],
     "AutomaticThought": [
         ("leadsTo", "Reaction",
@@ -359,6 +363,11 @@ ANCHOR_FAMILIES: dict[str, list[tuple[str, str, str]]] = {
         ("becomesSituation", "Situation",
          "this reaction itself became the trigger for a new thought (cascade) — only "
          "if the transcript clearly shows it"),
+        ("leadsTo", "Reaction",
+         "this reaction led to that next reaction in the SAME episode, as an explicit "
+         "ordered sequence (e.g. scared → goosebumps → fled) — only when the transcript "
+         "shows the order; if the reactions are independent responses to the same thought, "
+         "leave them parallel (do not link)"),
     ],
     "Problem": [
         ("manifestsAs", "Situation",

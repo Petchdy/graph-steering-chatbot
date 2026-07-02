@@ -10,13 +10,24 @@ Tier A (every client turn — runs in background asyncio Task):
   2. ATOMIZE     — V4_flat Stage 1.2 prompt for AT / CoreBelief / IB only.
   3. PROPERTIES  — V4_flat Stage 2.5 classifiers (discriminators FIRST).
   4. MERGE       — string-Jaccard against existing graph nodes.
-  5. EDGES       — V4_flat Stage 3 anchor prompt, per-turn-safe edges only.
+  5. EDGES       — V4_flat Stage 3 Pass A anchor prompt (ANCHOR_FAMILIES), run against this
+                   turn's new nodes as subject. Covers every ANCHOR_FAMILIES relation, e.g.
+                   triggers/leadsTo/stemsFrom/manifestsAs/hasAdaptiveResponse/becomesSituation
+                   — whatever fires depends on which compatible object nodes already exist.
 
 Tier B (every CONSOLIDATE_EVERY turns; reset/session-end):
-  1. SESSION-LEVEL — V4_flat Stage 1.1 over whole transcript.
-  2. REINFORCES    — V4_flat Stage 3 Pass B wide-window Reaction × CoreBelief.
-  3. REFRAME       — confirm hasAdaptiveResponse / produces / appliedTo edges.
-  4. STRUCTURE     — deterministic Client/Session/Goal-targets-Problem/etc.
+  1. SESSION-LEVEL — V4_flat Stage 1.1 over whole transcript (Problem, Goal, Intervention,
+                     Homework, CoreBelief, IntermediateBelief, AdaptiveResponse).
+  2. EDGES (wide)  — same Pass A anchor prompt as Tier A, but run against the nodes just
+                     added by the session-level pass, over the FULL transcript as context.
+                     This is what actually resolves appliedTo/produces/targets/targetsProblem
+                     — their subjects (Intervention/Homework/Goal) are only ever created here.
+  3. REINFORCES    — V4_flat Stage 3 Pass B wide-window Reaction × CoreBelief. The one relation
+                     that is genuinely never per-turn-safe (needs the full Reaction×CoreBelief
+                     cross-product; absence is clinically meaningful, so never guessed locally).
+  4. REFRAME       — heuristic best-effort hasAdaptiveResponse fallback (Jaccard word-overlap)
+                     for cases the anchor prompt in step 2 misses.
+  5. STRUCTURE     — deterministic Client/Session/Goal-targets-Problem/etc.
 """
 
 from __future__ import annotations
@@ -40,10 +51,14 @@ from .prompts import (ATOMIZE_PROMPT, AT_SPECIFIC_CLAUSE, EDGE_ANCHOR_PROMPT,
                       REINFORCES_PROMPT, SELF_BELIEF_CLAUSE,
                       SESSION_LEVEL_PROMPT)
 
-PER_TURN_SAFE_PREDICATES = frozenset({
-    "triggers", "leadsTo", "stemsFrom", "manifestsAs",
-    "givesRiseTo", "influencesPerceptionOf", "associatedWith",
-})
+# Per cbt_kg_extraction_descriptions_V4_flat.md, every ANCHOR_FAMILIES relation is Pass A
+# (local, subject-anchored) — V4_flat never distinguished a "per-turn-safe" subset. The one
+# genuinely wide-window-only relation is `reinforces` (Reaction reinforces CoreBelief, resolved
+# separately by _reinforces_pass), which is NOT part of ANCHOR_FAMILIES. So the safe set is
+# simply everything ANCHOR_FAMILIES defines.
+PER_TURN_SAFE_PREDICATES = frozenset(
+    pred for fams in ANCHOR_FAMILIES.values() for (pred, _obj, _hint) in fams
+)
 
 ATOMIZE_CLASSES = frozenset({"AutomaticThought", "CoreBelief", "IntermediateBelief"})
 
@@ -219,8 +234,22 @@ class TurnPipeline:
             print(f"[consolidate] stage1.1 failed: {exc}", file=sys.stderr)
 
         added_edges = []
+        # Local (ANCHOR_FAMILIES) edges for the nodes the session-level pass just added.
+        # Intervention/Homework/Goal/etc. are only ever created here (never in Tier A), so
+        # appliedTo/produces/targets/targetsProblem/manifestsAs can only fire from this call.
+        if added_nodes:
+            try:
+                new_ids = set(added_nodes)
+                new_node_objs = [n for n in graph.nodes() if n.node_id in new_ids]
+                wide_window = [(sp, tx) for _, sp, tx in transcript]
+                last_turn = transcript[-1][0]
+                added_edges += self._resolve_local_edges(
+                    new_node_objs, graph, wide_window, last_turn)
+            except Exception as exc:
+                print(f"[consolidate] session-level edges failed: {exc}", file=sys.stderr)
+
         try:
-            added_edges = self._reinforces_pass(graph, transcript)
+            added_edges += self._reinforces_pass(graph, transcript)
         except Exception as exc:
             print(f"[consolidate] reinforces failed: {exc}", file=sys.stderr)
 

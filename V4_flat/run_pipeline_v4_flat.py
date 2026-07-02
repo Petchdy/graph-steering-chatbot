@@ -34,20 +34,60 @@ from langchain_core.outputs import LLMResult
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from cbt_ontology_v4_flat import load_transcript
-from cbt_stage1_extract_v4 import run_stage1
+from cbt_stage1_extract_v4_flat import run_stage1
 from cbt_stage1_1_session_extract import run_stage1_1, SESSION_LEVEL_CLASSES
 from cbt_stage1_2_atomize import run_stage1_2
 from cbt_stage1_5_validate import run_stage1_5
-from cbt_stage2_merge_v4 import run_stage2, GATE, AUTO
-from cbt_stage2_5_properties_v4 import run_stage2_5
-from cbt_stage3_chains_v4 import run_stage3, _structure_edges  # noqa: F401
-from cbt_stage4_validate_v4 import run_stage4
-from cbt_stage5_persist_v4 import build_json, save_json, write_neo4j, CLIENT_ID, SESSION_ID
-from cbt_reporter_v4 import generate_markdown_report
+from cbt_stage2_merge_v4_flat import run_stage2, GATE, AUTO
+from cbt_stage2_5_properties_v4_flat import run_stage2_5
+from cbt_stage3_chains_v4_flat import run_stage3, _structure_edges  # noqa: F401
+from cbt_stage4_validate_v4_flat import run_stage4
+from cbt_stage5_persist_v4_flat import build_json, save_json, write_neo4j, CLIENT_ID, SESSION_ID
+from cbt_reporter_v4_flat import generate_markdown_report
 
-LLM_MODEL = "qwen3.5-nothink"
 EMBED_MODEL = "qwen3-embedding:8b"
-OLLAMA_TIMEOUT = 900  # 15-minute timeout per LLM call
+
+# (model_name, timeout_seconds, default_ctx, min_vram_gb)
+# default/qwen27b are nothink variants (stop-token Modelfiles) — create with:
+#   ollama create qwen3.5-nothink    -f Modelfile
+#   ollama create qwen3.5-27b-nothink -f Modelfile.27b
+# qwen9b uses qwen3.5-9b-nothink directly (already pulled; no Modelfile needed).
+# qwen35b uses qwen3.5:35b directly — reasoning=False (think: false API param) is
+# sufficient; a stop-token Modelfile conflicts with think:false on the qwen35moe
+# MoE architecture. VRAM requirement: qwen3.5:35b Q4_K_M = 23 GB — needs a GPU
+# with ≥24 GB. On a 20 GB GPU use --model qwen27b (17 GB) instead, or pull a
+# lower-quant tag: ollama pull qwen3.5:35b-q2_K (~12 GB).
+MODEL_MAP = {
+    "default": ("qwen3.5-9b-nothink",  900,  8192,  None),
+    "qwen9b":  ("qwen3.5-9b-nothink",  900,  8192,  None),
+    "qwen27b": ("qwen3.5-27b-nothink", 1800, 16384, 17),
+    "qwen35b": ("qwen3.5:35b",         1800, 8192,  24),
+}
+
+def _check_vram(model_alias: str, llm_model: str) -> None:
+    """Abort early if the selected model requires more VRAM than the GPU has."""
+    _, _, _, min_vram_gb = MODEL_MAP[model_alias]
+    if not min_vram_gb:
+        return
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+        vram_gb = int(out.splitlines()[0]) / 1024
+        if vram_gb < min_vram_gb:
+            print(
+                f"\n[ERROR] {llm_model} requires ~{min_vram_gb} GB VRAM "
+                f"but your GPU has {vram_gb:.0f} GB.\n"
+                f"  The model will split to system RAM and fail with CUDA errors mid-run.\n"
+                f"  Alternatives:\n"
+                f"    --model qwen27b          (17 GB, fits in {vram_gb:.0f} GB)\n"
+                f"    ollama pull qwen3.5:35b-q2_K  (~12 GB), then rerun with --model qwen35b\n",
+                file=sys.stderr)
+            sys.exit(1)
+    except FileNotFoundError:
+        pass   # no nvidia-smi — skip check
+
 
 class TokenUsageCallbackHandler(BaseCallbackHandler):
     def __init__(self, ctx_limit: int):
@@ -123,7 +163,8 @@ def _count_edges_by_predicate(edges: list) -> dict[str, int]:
     return dict(sorted(out.items()))
 
 
-def _brief_report(transcript_path: str, turns, ctx_limit: int, max_workers: int):
+def _brief_report(transcript_path: str, turns, ctx_limit: int, max_workers: int,
+                  llm_model: str, timeout: int):
     """Print a brief summary of the pipeline configuration before starting."""
     speakers = {}
     for t in turns:
@@ -138,20 +179,26 @@ def _brief_report(transcript_path: str, turns, ctx_limit: int, max_workers: int)
     for spk, cnt in sorted(speakers.items()):
         print(f"    {spk:>10} : {cnt} turns")
     print(f"  Avg length  : {avg_len:.0f} chars/turn")
-    print(f"  LLM model   : {LLM_MODEL}")
+    print(f"  LLM model   : {llm_model}")
     print(f"  Embed model : {EMBED_MODEL}")
     print(f"  Context     : {ctx_limit} tokens")
-    print(f"  Timeout     : {OLLAMA_TIMEOUT}s ({OLLAMA_TIMEOUT // 60}min) per call")
+    print(f"  Timeout     : {timeout}s ({timeout // 60}min) per call")
     print(f"  Workers     : {max_workers}")
     print("=" * 60)
     print()
 
 
 def run(transcript_path: str, out_dir: str = ".", use_neo4j: bool = False,
-        session_type: str = "therapy", ctx_limit: int = 8192,
-        max_workers: int = 1, limit: int = 0, merge_debug: bool = False) -> str:
+        session_type: str = "therapy", ctx_limit: int | None = None,
+        max_workers: int = 1, limit: int = 0, merge_debug: bool = False,
+        model_alias: str = "default") -> str:
+    os.makedirs(out_dir, exist_ok=True)
+    llm_model, timeout, default_ctx, _ = MODEL_MAP[model_alias]
+    _check_vram(model_alias, llm_model)
+    if ctx_limit is None:
+        ctx_limit = default_ctx
     callbacks = [TokenUsageCallbackHandler(ctx_limit)]
-    llm = ChatOllama(model=LLM_MODEL, temperature=0, request_timeout=OLLAMA_TIMEOUT,
+    llm = ChatOllama(model=llm_model, temperature=0, request_timeout=timeout,
                      callbacks=callbacks, num_ctx=ctx_limit, reasoning=False)
     embedder = OllamaEmbeddings(model=EMBED_MODEL)
 
@@ -160,7 +207,7 @@ def run(transcript_path: str, out_dir: str = ".", use_neo4j: bool = False,
         turns = turns[:limit]
     name = os.path.basename(transcript_path)
 
-    _brief_report(transcript_path, turns, ctx_limit, max_workers)
+    _brief_report(transcript_path, turns, ctx_limit, max_workers, llm_model, timeout)
 
     t_pipeline = time.time()
 
@@ -259,9 +306,13 @@ def run(transcript_path: str, out_dir: str = ".", use_neo4j: bool = False,
         "Pass B: wide-window Reaction × CoreBelief reinforces. "
         "Pass C: deterministic Session→Problem/Intervention/Homework + hasSession.",
         {"anchored subjects": n_subjects})
-    edges, stage3_audit = run_stage3(merged.survivors, turns, CLIENT_ID, SESSION_ID, llm)
+    edges, stage3_audit, derived_nodes = run_stage3(merged.survivors, turns, CLIENT_ID, SESSION_ID, llm, embedder)
+    # Merge Pass-D derived belief nodes into survivors so Stage 4 can validate their edges
+    for dn in derived_nodes:
+        merged.survivors.setdefault(dn.label, []).append(dn)
     _stage_summary("Stage 3", t,
                    total_candidate_edges=len(edges),
+                   derived_nodes=len(derived_nodes),
                    per_predicate=_count_edges_by_predicate(edges))
 
     # ─── Stage 4 ─────────────────────────────────────────────────────────────
@@ -325,9 +376,13 @@ if __name__ == "__main__":
     
     ap = argparse.ArgumentParser(description="CBT KG — V4_flat pipeline runner.")
     ap.add_argument("transcript", help="Path to transcript JSON")
-    ap.add_argument("out_dir", nargs="?", default=".", help="Output directory")
+    default_out_dir = str(Path(__file__).resolve().parents[1] / "results" / "V4_flat_result")
+    ap.add_argument("out_dir", nargs="?", default=default_out_dir, help="Output directory")
     ap.add_argument("--neo4j", action="store_true", help="Push results to Neo4j")
-    ap.add_argument("--ctx", type=int, default=8192, help="LLM context window in tokens")
+    ap.add_argument("--model", choices=list(MODEL_MAP), default="default",
+                    help="Model alias: default=qwen3.5-nothink, qwen27b=qwen3.5-27b-nothink, qwen35b=qwen3.5:35b (base model, no Modelfile needed)")
+    ap.add_argument("--ctx", type=int, default=None,
+                    help="LLM context window in tokens (default: per-model default)")
     ap.add_argument("--workers", type=int, default=1, help="Max workers for parallel extract")
     ap.add_argument("--limit", type=int, default=0, help="Limit number of turns for testing")
     ap.add_argument("--merge-debug", action="store_true",
@@ -335,4 +390,5 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     run(args.transcript, args.out_dir, args.neo4j, ctx_limit=args.ctx,
-        max_workers=args.workers, limit=args.limit, merge_debug=args.merge_debug)
+        max_workers=args.workers, limit=args.limit, merge_debug=args.merge_debug,
+        model_alias=args.model)
