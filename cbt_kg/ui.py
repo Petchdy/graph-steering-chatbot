@@ -790,7 +790,21 @@ function confirmNode() {
 }
 
 function saveJSON() {
-  const blob = new Blob([JSON.stringify({nodes:nodes,edges:edges},null,2)],{type:'application/json'});
+  // V4_flat Stage 5 export shape (matches JsonGraphReader in graph_reader.py) so a saved
+  // file can be re-loaded via "Load JSON" without corruption. Only 'found' items are
+  // exported — 'missing' placeholders aren't real extracted facts.
+  const outNodes = nodes
+    .filter(function(n) { return n.status === 'found'; })
+    .map(function(n) { return {id: n.id, label: n.label, properties: n.props || {},
+                                evidence: n.evidence || []}; });
+  const outEdges = edges
+    .filter(function(e) { return e.status === 'found'; })
+    .map(function(e) {
+      const out = {type: e.predicate, from: e.from, to: e.to, evidence: e.evidence || []};
+      if (e.props && e.props.reportedIntensity) out.reportedIntensity = e.props.reportedIntensity;
+      return out;
+    });
+  const blob = new Blob([JSON.stringify({nodes:outNodes,edges:outEdges},null,2)],{type:'application/json'});
   const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='cbt_graph.json'; a.click();
 }
