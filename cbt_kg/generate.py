@@ -22,10 +22,19 @@ def _build_messages(system: str, history: list[tuple[str, str]]) -> list[dict]:
 
 
 def _parse_json(raw: str) -> dict:
-    """Strip markdown fences and parse JSON. Returns fallback dict on failure.
+    """Strip markdown fences and parse JSON. Returns a partial dict on failure.
 
     qwen3.5 with format=json sometimes over-escapes string delimiters as `\\"`
     instead of `"`. We retry with those collapsed when the first parse fails.
+
+    Ollama's format=json grammar enforcement is unreliable for this model/build
+    (custom RENDERER/PARSER qwen3.5): the model sometimes prepends a plain-prose
+    draft before the actual JSON object, or skips JSON entirely. So after a
+    whole-string parse fails, we scan for ANY `{...}` object embedded in the
+    text (preferring the last one, since a trailing JSON object after prose is
+    the most common malformed shape) before giving up. On total failure we
+    return only "response" — no "technique"/"phase" keys — so the caller can
+    fall back to the session's current values instead of a hardcoded reset.
     """
     cleaned = re.sub(r"^```json\s*|^```\s*|```$", "", raw.strip(), flags=re.MULTILINE).strip()
     try:
@@ -37,15 +46,20 @@ def _parse_json(raw: str) -> dict:
         return json.loads(fixed)
     except json.JSONDecodeError:
         pass
+    # Scan for an embedded {...} object (model prepended prose before/after it).
+    for m in reversed(list(re.finditer(r"\{.*?\}", cleaned, re.DOTALL))):
+        try:
+            parsed = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and "response" in parsed:
+            return parsed
     # Last-ditch: pull out a "response" string by regex so the chat doesn't break.
     m = re.search(r'"response"\s*:\s*\\?"(.+?)\\?"\s*,', cleaned, re.DOTALL)
     if m:
-        return {"response": m.group(1), "technique": "Rapport Building", "phase": "Rapport"}
+        return {"response": m.group(1)}
     print(f"[generate] JSON parse failed, using raw text as response. raw={raw[:120]!r}")
-    return {"response": raw, "technique": "Rapport Building", "phase": "Rapport"}
-
-
-_FALLBACK = {"response": "", "technique": "Rapport Building", "phase": "Rapport"}
+    return {"response": raw}
 
 
 class EchoGenerator:

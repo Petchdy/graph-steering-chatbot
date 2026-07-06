@@ -106,9 +106,29 @@ async def async_turn(session: Session, user_message: str) -> dict:
         extraction_task.cancel()
         raise
 
+    current_technique = snap.get("active_technique") or "Rapport Building"
     reply     = result.get("response", "")
-    technique = result.get("technique", "Rapport Building")
-    proposed  = result.get("phase", "Rapport")
+    technique = result.get("technique") or current_technique
+    # The model's own "phase" self-report is not trustworthy as the sole
+    # advancement signal: it's hard-coded into its own context ("CURRENT
+    # SESSION STATE: Session phase: Rapport") and in practice it mostly just
+    # echoes that value back rather than reasoning about whether to graduate
+    # — confirmed live: turns with a Problem node + turn_count >= 2 (i.e.
+    # Exploration's gate already satisfied) still got "phase": "Rapport" back
+    # on turns where JSON parsing succeeded, so relying on the model to ever
+    # *propose* "Exploration" left the session stuck even though the real
+    # (deterministic, node-grounded) gate in validate_phase would have granted
+    # it. So we always propose at least the next phase in PHASE_ORDER every
+    # turn — validate_phase's node-count/turn-count gate is the actual
+    # authority and will reject it if unearned — while still respecting the
+    # model if it ever proposes something further ahead than that.
+    idx_current = PHASE_ORDER.index(current_phase) if current_phase in PHASE_ORDER else 0
+    next_phase = PHASE_ORDER[min(idx_current + 1, len(PHASE_ORDER) - 1)]
+    model_phase = result.get("phase")
+    if model_phase in PHASE_ORDER and PHASE_ORDER.index(model_phase) > PHASE_ORDER.index(next_phase):
+        proposed = model_phase
+    else:
+        proposed = next_phase
     session.history[-1] = (user_message, reply)
     session.transcript.append((turn_index, "therapist", reply))
 
