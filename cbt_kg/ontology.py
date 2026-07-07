@@ -81,7 +81,11 @@ CLASS_DEFINITIONS: dict[str, str] = {
         "with no condition — e.g. 'I am worthless', 'I am unlovable', 'people cannot be "
         "trusted'. It is NOT a rule and NOT a condition. If the text contains "
         "'I must / I should / I have to' or 'if ... then ...', it is an IntermediateBelief, "
-        "not a CoreBelief. If it is tied to one specific moment, it is an AutomaticThought."
+        "not a CoreBelief. If it is tied to one specific moment, it is an AutomaticThought. "
+        "A hedge in front of the SAME absolute self-label — 'maybe I'm worthless', 'I think "
+        "I'm a failure', 'I guess I'm unlovable' — is still a CoreBelief: the hedge is just "
+        "tentative delivery (often the client voicing a core belief for the first time), not "
+        "evidence that it's a one-off, situation-tied thought."
     ),
     "IntermediateBelief": (
         "A conditional or instrumental belief sitting between core beliefs and automatic "
@@ -103,10 +107,12 @@ CLASS_DEFINITIONS: dict[str, str] = {
         "text back, he's angry at me'. It is NOT a general rule or should-type standard "
         "('I must / should / have to / am supposed to / am meant to ...' = "
         "IntermediateBelief) and NOT an absolute identity claim ('I am worthless' = "
-        "CoreBelief). Before labeling something AutomaticThought, check first whether it "
-        "expresses a standard the client holds themselves to (→ IntermediateBelief) rather "
-        "than a reaction tied to one specific moment. Keep emotions OUT of the content (a "
-        "feeling is a Reaction)."
+        "CoreBelief — even hedged, e.g. 'maybe I'm worthless' or 'I guess I'm a failure', "
+        "since the hedge is tentative delivery, not situation-specificity). Before labeling "
+        "something AutomaticThought, check first whether it expresses a standard the client "
+        "holds themselves to (→ IntermediateBelief) or an absolute self/other/world label "
+        "(→ CoreBelief) rather than a reaction tied to one specific moment. Keep emotions "
+        "OUT of the content (a feeling is a Reaction)."
     ),
     "Reaction": ("The client's response to an automatic thought — a feeling, an "
                  "action/avoidance, or a body sensation."),
