@@ -509,8 +509,21 @@ class TurnPipeline:
         back to a flat whole-graph orphan scan when the new node has no edges yet —
         early in a session there's no structure to trace, so the conservative fallback
         is correct rather than silently finding nothing.
+
+        Fully-isolated nodes (zero edges anywhere — e.g. a Problem whose only outgoing
+        predicate, manifestsAs->Situation, never found a match) are always folded into
+        the pool too: BFS can never reach them regardless of max_hops since it only
+        walks existing edges, so without this they'd never get a second chance even
+        though they're exactly the "found but permanently orphaned" case this step
+        exists to fix. Cheap — a plain in-memory set diff, no extra LLM calls unless a
+        real candidate turns up.
         """
         by_id = {n.node_id: n for n in graph.nodes() if n.status == "found"}
+        connected_ids = {
+            nid for e in graph.edges() if e.status == "found"
+            for nid in (e.subject_id, e.object_id)
+        }
+        isolated_ids = set(by_id) - connected_ids
         candidates: list = []
         seen_ids: set = set()
         for new_node in new_nodes:
@@ -518,9 +531,10 @@ class TurnPipeline:
             if not subj_labels:
                 continue
             reachable = self._bfs_reachable(graph, new_node.node_id, max_hops)
-            pool = [by_id[nid] for nid in reachable if nid in by_id] or list(by_id.values())
-            for n in pool:
-                if (n.node_id in exclude_ids or n.node_id in seen_ids
+            pool_ids = (reachable | isolated_ids) if reachable else set(by_id)
+            for nid in pool_ids:
+                n = by_id.get(nid)
+                if (n is None or n.node_id in exclude_ids or n.node_id in seen_ids
                         or n.label not in subj_labels):
                     continue
                 if self._is_orphan(graph, n):
