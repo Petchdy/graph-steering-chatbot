@@ -155,6 +155,9 @@ async def async_turn(session: Session, user_message: str) -> dict:
         "new_nodes": extraction_result.get("new_nodes", []),
         "new_edges": extraction_result.get("edges", []),
         "graph_snapshot": session.graph.snapshot(),
+        # Only set by SteeredRemoteGenerator ("steered"/"fallback"/"none"); absent for
+        # EchoGenerator/LocalLLMGenerator, which don't have a steering concept.
+        "steer_status": result.get("steer_status"),
     }
 
 

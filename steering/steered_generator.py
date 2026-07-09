@@ -64,20 +64,23 @@ class SteeredRemoteGenerator(Generator):
         # baseline whose ONLY difference from a steered reply is the vector.
         if strat == "none":
             if base.get("response"):
-                return base
+                return {**base, "steer_status": "none"}
             try:
                 txt = self._service("none", history)
                 if txt:
-                    return {**base, "response": txt}
+                    return {**base, "response": txt, "steer_status": "none"}
             except Exception as exc:  # noqa: BLE001
                 print(f"[steered] service error on none baseline ({exc})")
             base["response"] = base.get("response") or "(steering service unavailable)"
-            return base
+            return {**base, "steer_status": "none"}
 
+        # A strategy is selected but the service errored or returned nothing — this is silent to
+        # the chat itself (never breaks the turn), but the UI needs to know so it can show the
+        # reply is NOT actually steered, rather than leaving the user to guess from tone alone.
         try:
             steered = self._service(strat, history)
             if steered:
-                return {**base, "response": steered}
+                return {**base, "response": steered, "steer_status": "steered"}
         except Exception as exc:  # noqa: BLE001 — never break the chat on a steering hiccup
             print(f"[steered] service error ({exc}); falling back to base reply")
-        return base
+        return {**base, "steer_status": "fallback"}

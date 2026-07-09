@@ -871,11 +871,30 @@ def _render_canvas(
 # Session bar HTML helper
 # ─────────────────────────────────────────────────────────────────────────
 
-def _session_bar_html(phase: str, technique: str, turn_count: int, strategy: str = "none") -> str:
+def _session_bar_html(phase: str, technique: str, turn_count: int, strategy: str = "none",
+                       steer_status: str | None = None) -> str:
     steer = ""
     if strategy and strategy != "none":
-        steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
-                 f'background:#FDECEC;color:#B4232A;">steer: {html.escape(strategy)}</span>')
+        if steer_status == "steered":
+            steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
+                     f'background:#FDECEC;color:#B4232A;">steer: {html.escape(strategy)}</span>')
+        elif steer_status == "fallback":
+            # The steering service errored/returned nothing for THIS turn and
+            # SteeredRemoteGenerator silently fell back to the plain Ollama reply.
+            steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
+                     f'background:#FFF3CD;color:#8A6100;" '
+                     f'title="Steering service unavailable this turn — used the plain reply instead.">'
+                     f'steer: {html.escape(strategy)} (fallback)</span>')
+        else:
+            # steer_status is None — the active generator has no steering concept at all
+            # (GENERATOR != steered), so the dropdown selection was never even attempted, not
+            # just unavailable for one turn. Distinct from "fallback" so this doesn't read as a
+            # transient hiccup — it means steering isn't wired up for this session at all.
+            steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
+                     f'background:#EEE;color:#888;" '
+                     f'title="This session\'s generator has no steering support — set GENERATOR=steered '
+                     f'and restart the chatbot for the dropdown to take effect.">'
+                     f'steer: {html.escape(strategy)} (inactive)</span>')
     return (
         '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
         f'<span style="font-size:11px;font-weight:500;padding:3px 10px;border-radius:20px;'
@@ -915,7 +934,8 @@ def _bot_respond(message: str, history: list, session: Session, strategy: str = 
     history = history + [{"role": "assistant", "content": result["reply"]}]
     phase = result["phase"]
     technique = result["technique"]
-    bar_html = _session_bar_html(phase, technique, session.turn_count, strategy)
+    bar_html = _session_bar_html(phase, technique, session.turn_count, strategy,
+                                  result.get("steer_status"))
     nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges())
     graph_html = _render_canvas(nodes, edges, edit_mode=False)
     return history, session, bar_html, graph_html
