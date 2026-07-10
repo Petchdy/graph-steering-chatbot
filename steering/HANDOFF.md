@@ -31,6 +31,29 @@ conda activate ./cbt-conda && GENERATOR=steered EXTRACTOR=stub uvicorn cbt_kg.ap
 UI at http://localhost:8000 (VS Code Remote-SSH → Ports panel → open 8000). A/B a message:
 `python steering/compare.py -n 3 "your message"`. Stop: `pkill -f serve_steer ; pkill -f "uvicorn cbt_kg.api"`.
 
+### GPU-lean single-model mode (2026-07-07 — no Ollama, ~8 GB)
+Runs the WHOLE app on the one HF Qwen3.5-9B behind the steering service — no second model, no Ollama.
+Steering still requires the HF forward-hook (Ollama exposes no residual stream), so we go the other
+way: the extractor + narration also use the HF model via the service's Ollama-compatible
+`/api/generate` route (point them at it with `OLLAMA_HOST`). Two terminals, **do not start Ollama**:
+```
+conda activate ./cbt-conda && uvicorn steering.serve_steer:app --port 8100    # the only model (~8 GB)
+conda activate ./cbt-conda && GENERATOR=steered STEER_NO_OLLAMA=1 \
+    EXTRACTOR=local OLLAMA_HOST=http://localhost:8100 \
+    uvicorn cbt_kg.api:app --port 8000                                         # UI, no Ollama
+```
+- `STEER_NO_OLLAMA=1` → the generator never calls Ollama; baseline (`none`) + steered replies both
+  come from the HF model (baseline gets the CBT `system` prompt passed through).
+- `OLLAMA_HOST=http://localhost:8100` → the CBT extractor/narration hit the service's `/api/generate`
+  (no steering hook) instead of a real Ollama. The graph stays fully functional.
+- **Cost = latency, not capability:** the extractor fires ~8+ full generations per client turn (more
+  on consolidation turns), and 4-bit HF transformers is slower per-generation than Ollama's GGUF
+  serving — so turns are slower. GPU stays ~8 GB (one model).
+- **Isolation:** all model calls are serialized by a lock in `serve_steer.py`, so the steering hook
+  (registered only for a steered `/generate`, removed in `finally`) can never be live during an
+  extraction forward pass — steering cannot contaminate extraction. Extraction runs on the clean
+  base model (4-bit, so marginally lossier than Ollama's quant — the only quality asterisk).
+
 ## The method (what/why)
 - **Model:** Qwen3.5-9B (multimodal; we steer its 32-layer text backbone), 4-bit nf4.
 - **Steering:** DiffMean (CAA) depth-robust unit vector added at **layer 19** (global), renormed to
@@ -39,6 +62,13 @@ UI at http://localhost:8000 (VS Code Remote-SSH → Ports panel → open 8000). 
   not the prompt — except **Question**, which gets a question-eliciting prompt override.
 - **Generation guards (essential):** `repetition_penalty=1.3` + `no_repeat_ngram_size=3` — without
   them steering loops. Env: `STEER_REP_PENALTY`, `STEER_NO_REPEAT`, `STEER_MAX_NEW`.
+  - **2026-07-07 fix — rep-penalty is now NEW-TOKENS-ONLY** (`new_token_rep_penalty` in
+    `steer_runtime.py`, wired via `logits_processor`). HF's built-in `repetition_penalty` penalizes
+    the whole context; in live multi-turn chat the history is the model's own phrasing, so after ~4
+    turns the 1.3x penalty bans its natural register and degenerates into word-salad (verified: a
+    live Question chat broke by turn ~4; replay reproduced it in ~20% of samples, and rp=1.0 /
+    rp=1.1 / new-token-only all fixed it 12/12). The anti-loop guard is only needed WITHIN a reply,
+    so it's now scoped there. `no_repeat_ngram_size` was NOT the cause and is unchanged.
 
 ## Shipped config (`artifacts/steering_config.json`, judge-picked)
 layer 19 · α̂: Affirmation 0.75, Reflection 0.5, Info+Suggest 0.5, Question 0.5 (+prompt nudge),

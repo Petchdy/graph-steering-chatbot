@@ -51,6 +51,19 @@ A/B compare: `python steering/compare.py -n 3 "your message"`. In the UI, `strat
 Ollama (or falls back to an unhooked call to the steering service); pick a real strategy to demo
 steering without Ollama.
 
+**GPU-lean single-model mode (no Ollama, ~8 GB, graph still works):** run everything on the one HF
+model behind the steering service. `STEER_NO_OLLAMA=1` makes the generator produce both `none` and
+steered replies from the HF model; `OLLAMA_HOST=http://localhost:8100` routes the extractor/narration
+to the service's Ollama-compatible `/api/generate` (no-hook) route, so the graph keeps populating.
+```bash
+uvicorn steering.serve_steer:app --host 127.0.0.1 --port 8100   # the only model
+export GENERATOR=steered STEER_NO_OLLAMA=1 EXTRACTOR=local OLLAMA_HOST=http://localhost:8100
+uvicorn cbt_kg.api:app --port 8000
+```
+Cost is latency (~8+ HF generations/turn, 4-bit HF slower than Ollama GGUF); a lock in
+`serve_steer.py` serializes model calls so steering can't contaminate extraction. Details in
+`steering/HANDOFF.md`.
+
 ## Cross-cutting architecture notes
 
 - **`cbt_kg/` never imports `steering/`, except through `factory.py`.** `make_generator()` in

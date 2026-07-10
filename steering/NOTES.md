@@ -73,6 +73,26 @@ uvicorn cbt_kg.api:app --port 8000
   — the reply is fully produced by the steering service. "none" and the knowledge-graph both need Ollama.
 - API: `POST /chat {session_id, message, strategy}` · `GET /strategies`.
 
+### GPU-lean single-model mode (2026-07-07) — no Ollama, graph still works, ~8 GB
+Everything runs on the one HF model behind the steering service; **do not start Ollama**. The
+extractor + narration reach the model through the service's Ollama-compatible `/api/generate` route.
+```bash
+# Terminal 1 — the ONLY model (steering service, ~8 GB GPU)
+conda activate ./cbt-conda && uvicorn steering.serve_steer:app --host 127.0.0.1 --port 8100
+
+# Terminal 2 — chatbot UI, no Ollama
+conda activate ./cbt-conda
+export GENERATOR=steered STEER_NO_OLLAMA=1 STEER_URL=http://localhost:8100
+export EXTRACTOR=local OLLAMA_HOST=http://localhost:8100   # extractor/narration → the HF service
+uvicorn cbt_kg.api:app --port 8000
+```
+- `STEER_NO_OLLAMA=1`: generator never calls Ollama; both `none` and steered replies come from the HF
+  model (baseline gets the CBT `system` prompt passed through). `OLLAMA_HOST` reuses the same service
+  for extraction, so the knowledge graph keeps populating on one model.
+- **Cost = latency:** ~8+ HF generations per client turn (4-bit HF is slower than Ollama's GGUF).
+- **Isolation:** a lock in `serve_steer.py` serializes all model calls, so the steering hook is never
+  live during an extraction call — steering can't contaminate extraction. See HANDOFF.md for detail.
+
 ## Viewing the UI from VS Code (Remote-SSH)
 When uvicorn starts on the VM, VS Code (connected via Remote-SSH) **auto-forwards** the port. Open the
 **Ports** panel (View → Ports, or the "Ports" tab next to the terminal), find **8000**, and click the

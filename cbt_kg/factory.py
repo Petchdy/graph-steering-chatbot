@@ -52,15 +52,22 @@ def make_generator() -> Generator:
             model=os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4-6"),
         )
     if kind == "steered":
-        # Steering overlay: reply steered by the local service; CBT technique/phase from Ollama.
+        # Steering overlay: reply steered by the local HF service.
+        # STEER_NO_OLLAMA=1 (GPU-lean single-model mode): no Ollama at all — the one HF model behind
+        # the steering service produces both steered and baseline replies; technique/phase default
+        # (therapy.py advances phases deterministically). Point the extractor at the same service via
+        # OLLAMA_HOST=<steer_url> so the CBT graph keeps working on one model.
+        # Otherwise (default): two-model mode — CBT technique/phase come from Ollama.
         from steering.steered_generator import SteeredRemoteGenerator
+        no_ollama = os.environ.get("STEER_NO_OLLAMA", "0") == "1"
+        fallback = None if no_ollama else LocalLLMGenerator(
+            model=os.environ.get("LOCAL_LLM_MODEL",
+                                 os.environ.get("OLLAMA_MODEL", "qwen3.5-nothink")),
+            base_url=os.environ.get("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1"),
+        )
         return SteeredRemoteGenerator(
             steer_url=os.environ.get("STEER_URL", "http://localhost:8100"),
-            fallback=LocalLLMGenerator(
-                model=os.environ.get("LOCAL_LLM_MODEL",
-                                     os.environ.get("OLLAMA_MODEL", "qwen3.5-nothink")),
-                base_url=os.environ.get("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1"),
-            ),
+            fallback=fallback,
             default_strategy=os.environ.get("STEER_DEFAULT_STRATEGY", "none"),
         )
     if kind == "local":
