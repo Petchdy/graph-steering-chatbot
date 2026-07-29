@@ -53,7 +53,8 @@ be set independently.
 | `GRAPH_BACKEND` | `memory` \| `neo4j` | `memory` |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | — | — |
 | `EXTRACTOR` | `local` \| `stub` | `local` |
-| `GENERATOR` | `local` \| `openrouter` \| `echo` | `local` |
+| `GENERATOR` | `local` \| `openrouter` \| `echo` \| `steered` | `local` |
+| `STEER_URL` / `STEER_DEFAULT_STRATEGY` / `STEER_NO_OLLAMA` | steering overlay (`GENERATOR=steered`) — see root `CLAUDE.md` + `steering/NOTES.md` | `http://localhost:8100` / `none` / `0` |
 | `OLLAMA_MODEL` | any Ollama tag | `qwen3.5-nothink` |
 | `OLLAMA_HOST` | URL | `http://localhost:11434` |
 | `LOCAL_LLM_MODEL` | any Ollama tag | falls back to `OLLAMA_MODEL` |
@@ -115,7 +116,7 @@ the bottom of the file implements the `Schema` Protocol.
 
 ### The dependency rule (load-bearing)
 
-`interfaces.py` defines six Protocols — `Schema`, `GraphStore`, `Extractor`,
+`interfaces.py` defines five Protocols — `Schema`, `GraphStore`, `Extractor`,
 `Generator`, `GraphReader` — plus `GraphNode` and `GraphEdge` dataclasses.
 **Every module except `factory.py` imports only from `interfaces.py` and
 `ontology.py`.** `factory.py` is the sole place that knows which class backs
@@ -189,11 +190,37 @@ V4_flat batch export). `QueryEngine.answer(question, nodes, edges)` does
 parse → execute → answer; execute is deterministic Python so the LLM cannot
 invent facts.
 
+### The graph canvas (`ui.py` — the largest module, ~1.2k lines)
+
+The visible graph is **not** Cytoscape. `graph_memory.cytoscape_render` /
+`GraphStore.cytoscape()` exist only for the `/graph/*` API consumers; the UI
+renders its own `<canvas>` + inspector panel and never calls them.
+
+- `_build_canvas_data(nodes, edges)` → canvas dicts. It drops `Utterance`
+  nodes and any edge whose status isn't `found` (placeholder edges are noise),
+  and keeps nodes of both statuses so `missing` classes stay visible as the
+  greyed-out "not yet discovered" scaffold.
+- `_CANVAS_TEMPLATE` is a plain string, **not an f-string** — it contains raw
+  CSS/JS braces. `_render_canvas` injects data via `__PLACEHOLDER__`
+  substitution (`__NODES__`, `__EDGES__`, `__EDIT_MODE__`, colour maps,
+  `__NODE_CLASSES__`, `__PREDICATES__`), then html-escapes the whole document
+  into an `<iframe srcdoc="…">`. Adding a value to the canvas means adding
+  both a placeholder and a `.replace()` — never an f-string interpolation.
+- One template serves both tabs; `edit_mode` toggles the edit affordances.
+- **Tab 2 edits never reach Python.** `saveNode` / `saveEdge` / `deleteNode` /
+  the create-modal mutate the iframe's local JS arrays only — there is no
+  postMessage or fetch back to the server, so any Gradio re-render discards
+  them. The sanctioned round-trip is the in-canvas `saveJSON()` (exports the
+  V4_flat Stage 5 shape, `found` items only) → re-upload via **Load JSON**.
+- `_NODE_CLASSES` / `_PREDICATES` / `NODE_COLORS` are hand-maintained lists,
+  not derived from `ontology.py`; extending the ontology means editing them too.
+
 ### FastAPI routes (`api.py`)
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/chat` | Send a client turn; returns `reply`, `technique`, `phase`, `new_nodes`, `new_edges`, `graph_snapshot` |
+| `GET` | `/strategies` | Steering strategies, proxied from the steering service; returns just `["none"]` when it is unreachable. It does **not** check `GENERATOR`, so it lists strategies whenever the service is up — even under `GENERATOR=local`, where picking one has no effect |
 | `POST` | `/reset` | Wipe and reinitialise the session graph |
 | `GET` | `/graph/{session_id}` | Cytoscape.js JSON of the live graph |
 | `POST` | `/load_graph/live` | Load a live Part 1 session as a query source |
@@ -213,6 +240,12 @@ gives the full OpenAPI spec.
 - `TurnPipeline` uses `/api/generate` with `format: "json"` and
   `temperature: 0`. Parse failures return `[]`; the pipeline soft-fails
   per-step (one bad prompt won't poison the whole turn).
+- `validate_phase` can only *veto* a phase, so `async_turn` always proposes at
+  least the next `PHASE_ORDER` entry — a generator that never advances the
+  phase itself still progresses, and a model jumping ahead is clamped to +1.
+- Under `GENERATOR=steered` the reply dict carries an extra `steer_status`
+  (`steered` | `fallback` | `none`) so the session bar can show that a picked
+  strategy silently failed instead of leaving it to be guessed from tone.
 - Sessions and loaded query-graphs are process-local dicts in `api.py`;
   restart wipes them. No persistence layer.
 - `api.py` mounts Gradio **after** all FastAPI routes are defined.

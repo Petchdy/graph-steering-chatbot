@@ -75,6 +75,11 @@ Cost is latency (~8+ HF generations/turn, 4-bit HF slower than Ollama GGUF); a l
   `technique`/`phase` (drives the knowledge graph), the steering microservice supplies only the reply
   text. Any steering-service error falls back to the Ollama reply — the chat path must never hard-fail
   on a steering hiccup.
+- **The UI's strategy dropdown is populated by `GET /strategies` in `cbt_kg/api.py`**, which proxies
+  the steering service and degrades to `["none"]` rather than erroring when it is unreachable — so
+  "only *none* is offered" means the service is down. The route does not consult `GENERATOR`: with the
+  service up but `GENERATOR=local`, the dropdown still lists all five and selecting one silently does
+  nothing (only `SteeredRemoteGenerator` honours the strategy).
 - **The steering service is a separate process on purpose** (`steering/serve_steer.py`, FastAPI on
   port 8100): Ollama exposes no residual stream, and activation steering needs a transformers
   forward-hook, so it can't happen inside Ollama. It lazy-loads Qwen3.5-9B (4-bit) on first
