@@ -19,7 +19,8 @@ import gradio as gr
 
 from . import factory
 from .interfaces import GraphEdge, GraphNode
-from .therapy import Session, turn
+from .therapy import (Session, turn, edit_turn, editable_turns, list_branches,
+                      switch_branch, _client_message_at)
 
 # ─────────────────────────────────────────────────────────────────────────
 # Color / style constants
@@ -1073,6 +1074,247 @@ def _query_ask(handle: str, question: str, chat_history: list):
 # ─────────────────────────────────────────────────────────────────────────
 # Compose the UI
 # ─────────────────────────────────────────────────────────────────────────
+# Tab 1 — rewriting a client turn (branching)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _history_to_chat(session: Session) -> list:
+    msgs = [{"role": "assistant", "content": INTRO}]
+    for user_msg, assistant_msg in session.history:
+        msgs.append({"role": "user", "content": user_msg})
+        if assistant_msg:
+            msgs.append({"role": "assistant", "content": assistant_msg})
+    return msgs
+
+
+def _branch_controls(session: Session | None):
+    """Refresh the version switcher from session state."""
+    if session is None:
+        return gr.update(choices=[], value=None)
+    brs = list_branches(session)
+    choices = [(("● " if b["active"] else "○ ") + b["label"], b["id"])
+               for b in brs]
+    active = next((b["id"] for b in brs if b["active"]), None)
+    return gr.update(choices=choices, value=active)
+
+
+def _therapy_view(session: Session, strategy: str, phase: str, technique: str,
+                  steer_status: str | None = None):
+    bar = _session_bar_html(phase, technique, session.turn_count, strategy,
+                            steer_status)
+    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges())
+    return bar, _render_canvas(nodes, edges, edit_mode=False)
+
+
+def _message_index_to_turn(chat_history: list, index) -> int:
+    """Chat-message position -> client turn number.
+
+    Counted rather than computed from the position, because the transcript is
+    not a clean alternation: it opens with the therapist's INTRO and a turn
+    whose reply failed contributes no assistant message.
+    """
+    if isinstance(index, (tuple, list)):
+        index = index[0]
+    upto = chat_history[:int(index) + 1]
+    return sum(1 for m in upto
+               if (m.get("role") if isinstance(m, dict) else None) == "user")
+
+
+def _on_edit_message(session: Session, chat_history: list, strategy: str,
+                     edit_data: gr.EditData):
+    """Inline pencil-edit of a client message = rewrite that turn."""
+    turn_index = _message_index_to_turn(chat_history, edit_data.index)
+    new_text = edit_data.value
+    if isinstance(new_text, dict):
+        new_text = new_text.get("content", "")
+    return _do_rewrite(session, turn_index, str(new_text or ""), strategy)
+
+
+def _do_rewrite(session: Session, turn_index, new_message: str,
+                strategy: str = "none"):
+    """Replay a past client turn with different words, keeping both versions."""
+    if session is None or turn_index in (None, "") or not (new_message or "").strip():
+        branch_dd = _branch_controls(session)
+        snap = session.graph.snapshot() if session else {}
+        bar, graph_html = (_therapy_view(session, strategy,
+                                         snap.get("session_phase", "Rapport"),
+                                         snap.get("active_technique", "Rapport Building"))
+                           if session else ("", _render_canvas([], [])))
+        return (_history_to_chat(session) if session else [], session, bar,
+                graph_html, branch_dd,
+                "Edit a message of yours to try it a different way.")
+    if hasattr(session.generator, "set_strategy"):
+        session.generator.set_strategy(strategy)
+    try:
+        result = edit_turn(session, int(turn_index), new_message)
+    except ValueError as exc:
+        branch_dd = _branch_controls(session)
+        snap = session.graph.snapshot()
+        bar, graph_html = _therapy_view(
+            session, strategy, snap.get("session_phase", "Rapport"),
+            snap.get("active_technique", "Rapport Building"))
+        return (_history_to_chat(session), session, bar, graph_html,
+                branch_dd, f"Cannot rewrite: {exc}")
+    bar, graph_html = _therapy_view(session, strategy, result["phase"],
+                                    result["technique"], result.get("steer_status"))
+    branch_dd = _branch_controls(session)
+    return (_history_to_chat(session), session, bar, graph_html, branch_dd,
+            f"Replayed turn {int(turn_index)} — the previous wording is kept, "
+            f"switch between them above.")
+
+
+def _do_switch_branch(session: Session, branch_id, strategy: str = "none"):
+    if session is None or not branch_id:
+        branch_dd = _branch_controls(session)
+        return ([] if session is None else _history_to_chat(session), session,
+                "", _render_canvas([], []), branch_dd, "No version selected.")
+    try:
+        switch_branch(session, branch_id)
+    except ValueError as exc:
+        branch_dd = _branch_controls(session)
+        return (_history_to_chat(session), session, "", _render_canvas([], []),
+                branch_dd, f"{exc}")
+    snap = session.graph.snapshot()
+    bar, graph_html = _therapy_view(
+        session, strategy, snap.get("session_phase", "Rapport"),
+        snap.get("active_technique", "Rapport Building"))
+    branch_dd = _branch_controls(session)
+    return (_history_to_chat(session), session, bar, graph_html, branch_dd,
+            "Switched — the conversation continues from this version.")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Tab 2 — repairing a loaded graph, then handing it back to the session
+# ─────────────────────────────────────────────────────────────────────────
+
+def _repair_controls(handle):
+    """Rebuild the node/edge pickers from the loaded graph."""
+    if not handle or handle not in _loaded_graphs:
+        empty = gr.update(choices=[], value=None)
+        return empty, empty, empty, empty
+    gnodes, gedges, _ = _loaded_graphs[handle]
+    node_choices = [
+        (f"{n.node_id} · {n.label} · {(_node_text(n) or '')[:34]}", n.node_id)
+        for n in gnodes if n.status == "found"
+    ]
+    edge_choices = [
+        (f"{e.subject_id} –{e.predicate}→ {e.object_id}", e.edge_id)
+        for e in gedges if e.status == "found"
+    ]
+    nodes_dd = gr.update(choices=node_choices, value=None)
+    return (nodes_dd, gr.update(choices=node_choices, value=None),
+            gr.update(choices=node_choices, value=None),
+            gr.update(choices=edge_choices, value=None))
+
+
+def _node_text(n: GraphNode) -> str:
+    for k in ("description", "content", "statement", "taskDescription", "text"):
+        v = n.props.get(k)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+
+
+def _pick_node(handle, node_id):
+    if not handle or handle not in _loaded_graphs or not node_id:
+        return gr.update(value=None), gr.update(value="{}")
+    gnodes, _, _ = _loaded_graphs[handle]
+    n = next((x for x in gnodes if x.node_id == node_id), None)
+    if n is None:
+        return gr.update(value=None), gr.update(value="{}")
+    return (gr.update(value=n.label),
+            gr.update(value=json.dumps(n.props, ensure_ascii=False, indent=2)))
+
+
+def _refresh_after_repair(handle, message: str):
+    gnodes, gedges, label = _loaded_graphs[handle]
+    n_dd, s_dd, o_dd, e_dd = _repair_controls(handle)
+    return (_summary_text(gnodes, gedges, label),
+            _make_query_graph_html(gnodes, gedges),
+            n_dd, s_dd, o_dd, e_dd, message)
+
+
+def _save_node(handle, node_id, label, props_json):
+    if not handle or handle not in _loaded_graphs or not node_id:
+        return _refresh_after_repair(handle, "Select a node first.") if handle in _loaded_graphs \
+            else (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                  "Load a graph first.")
+    try:
+        props = json.loads(props_json or "{}")
+        if not isinstance(props, dict):
+            raise ValueError("properties must be a JSON object")
+    except Exception as exc:
+        return _refresh_after_repair(handle, f"Invalid properties JSON: {exc}")
+    gnodes, gedges, glabel = _loaded_graphs[handle]
+    for n in gnodes:
+        if n.node_id == node_id:
+            n.props = props
+            if label:
+                n.label = label
+            break
+    _loaded_graphs[handle] = (gnodes, gedges, glabel)
+    return _refresh_after_repair(handle, f"Saved {node_id}.")
+
+
+def _delete_node_ui(handle, node_id):
+    if not handle or handle not in _loaded_graphs or not node_id:
+        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                gr.update(), "Select a node first.")
+    gnodes, gedges, glabel = _loaded_graphs[handle]
+    gnodes = [n for n in gnodes if n.node_id != node_id]
+    gedges = [e for e in gedges
+              if e.subject_id != node_id and e.object_id != node_id]
+    _loaded_graphs[handle] = (gnodes, gedges, glabel)
+    return _refresh_after_repair(handle, f"Deleted {node_id} and its edges.")
+
+
+def _add_edge_ui(handle, subj, pred, obj):
+    if not handle or handle not in _loaded_graphs:
+        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                gr.update(), "Load a graph first.")
+    if not (subj and pred and obj):
+        return _refresh_after_repair(handle, "Pick subject, predicate and object.")
+    gnodes, gedges, glabel = _loaded_graphs[handle]
+    new = GraphEdge(subject_id=subj, predicate=pred, object_id=obj, status="found")
+    if any(e.edge_id == new.edge_id for e in gedges):
+        return _refresh_after_repair(handle, "That edge already exists.")
+    gedges = gedges + [new]
+    _loaded_graphs[handle] = (gnodes, gedges, glabel)
+    return _refresh_after_repair(handle, f"Added {subj} –{pred}→ {obj}.")
+
+
+def _delete_edge_ui(handle, edge_id):
+    if not handle or handle not in _loaded_graphs or not edge_id:
+        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
+                gr.update(), "Select an edge first.")
+    gnodes, gedges, glabel = _loaded_graphs[handle]
+    gedges = [e for e in gedges if e.edge_id != edge_id]
+    _loaded_graphs[handle] = (gnodes, gedges, glabel)
+    return _refresh_after_repair(handle, "Edge deleted.")
+
+
+def _apply_to_session(handle, session: Session):
+    """Hand the corrected graph back to the live session and keep talking.
+
+    The next reply is built from graph.cbt_context(), so corrections take effect
+    on the very next turn — that is the whole point of the round-trip.
+    """
+    if session is None:
+        return "", _render_canvas([], []), "No therapy session yet — start one in Tab 1."
+    if not handle or handle not in _loaded_graphs:
+        return "", _render_canvas([], []), "Load a graph first."
+    gnodes, gedges, _ = _loaded_graphs[handle]
+    session.graph.replace_all(gnodes, gedges)
+    snap = session.graph.snapshot()
+    bar, graph_html = _therapy_view(
+        session, "none", snap.get("session_phase", "Rapport"),
+        snap.get("active_technique", "Rapport Building"))
+    n_found = sum(1 for n in gnodes if n.status == "found")
+    return (bar, graph_html,
+            f"Applied {n_found} nodes / {len(gedges)} edges to the therapy "
+            f"session — go back to Tab 1 and keep talking.")
+
+
+# ─────────────────────────────────────────────────────────────────────────
 
 with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as demo:
     session_state = gr.State(None)
@@ -1088,6 +1330,14 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                     chatbot = gr.Chatbot(
                         height=420,
                         show_label=False,
+                        # Gradio's default toolbar is ["share", "copy_all"], and
+                        # "share" opens a Hugging Face Spaces Discussions panel —
+                        # useless here and startling. Ask for the per-message
+                        # copy button only.
+                        buttons=["copy"],
+                        # Puts a pencil next to that copy button on client
+                        # messages; editing one fires .edit() below.
+                        editable="user",
                     )
                     with gr.Row():
                         msg_box = gr.Textbox(
@@ -1104,24 +1354,52 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                     )
                     reset_btn = gr.Button("New session")
 
+                    with gr.Row():
+                        branch_dd = gr.Dropdown(
+                            choices=[], label="Versions of this turn",
+                            interactive=True, scale=4,
+                            info="Edit any message of yours (pencil icon) to make "
+                                 "another version. ● = the one you're in.",
+                        )
+                        switch_btn = gr.Button("Switch", scale=1)
+                    branch_status = gr.Markdown("")
+
                 # Right column: live graph
                 with gr.Column(scale=3):
                     graph_panel = gr.HTML()
 
             therapy_outputs = [chatbot, session_state, session_bar, graph_panel]
+            branch_outputs = therapy_outputs + [branch_dd, branch_status]
 
             send_btn.click(
                 _add_user, [msg_box, chatbot], [chatbot, msg_box, pending_msg]
             ).then(
                 _bot_respond, [pending_msg, chatbot, session_state, strategy_dd], therapy_outputs
+            ).then(
+                _branch_controls, [session_state], [branch_dd]
             )
             msg_box.submit(
                 _add_user, [msg_box, chatbot], [chatbot, msg_box, pending_msg]
             ).then(
                 _bot_respond, [pending_msg, chatbot, session_state, strategy_dd], therapy_outputs
+            ).then(
+                _branch_controls, [session_state], [branch_dd]
             )
-            reset_btn.click(_reset_therapy, [], therapy_outputs)
-            demo.load(_reset_therapy, [], therapy_outputs)
+            reset_btn.click(_reset_therapy, [], therapy_outputs).then(
+                _branch_controls, [session_state], [branch_dd]
+            )
+            demo.load(_reset_therapy, [], therapy_outputs).then(
+                _branch_controls, [session_state], [branch_dd]
+            )
+
+            chatbot.edit(
+                _on_edit_message, [session_state, chatbot, strategy_dd],
+                branch_outputs,
+            )
+            switch_btn.click(
+                _do_switch_branch, [session_state, branch_dd, strategy_dd],
+                branch_outputs,
+            )
 
         # ── Tab 2: Query ─────────────────────────────────────────────
         with gr.Tab("Query (Part 2)"):
@@ -1153,6 +1431,7 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                     query_chat = gr.Chatbot(
                         height=300,
                         show_label=False,
+                        buttons=["copy"],   # drop the HF "share" panel here too
                     )
                     with gr.Row():
                         question_box = gr.Textbox(
@@ -1168,11 +1447,67 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                         value=_render_canvas([], [], edit_mode=True)
                     )
 
-            load_outputs = [handle_state, summary_md, query_graph_panel, query_chat, question_box]
+                    with gr.Accordion("Fix the graph", open=False):
+                        gr.Markdown(
+                            "Corrections here are saved server-side (unlike the "
+                            "canvas's own buttons, which only redraw). Apply them "
+                            "to the therapy session to keep talking with the "
+                            "corrected graph."
+                        )
+                        repair_node_dd = gr.Dropdown(choices=[], label="Node",
+                                                     interactive=True)
+                        repair_label_dd = gr.Dropdown(choices=_NODE_CLASSES,
+                                                      label="Class", interactive=True)
+                        repair_props_box = gr.Textbox(
+                            label="Properties (JSON)", lines=4, value="{}",
+                        )
+                        with gr.Row():
+                            save_node_btn = gr.Button("Save node")
+                            del_node_btn = gr.Button("Delete node")
+                        gr.Markdown("**Edges**")
+                        with gr.Row():
+                            edge_subj_dd = gr.Dropdown(choices=[], label="Subject",
+                                                       interactive=True)
+                            edge_pred_dd = gr.Dropdown(choices=_PREDICATES,
+                                                       label="Predicate",
+                                                       interactive=True)
+                            edge_obj_dd = gr.Dropdown(choices=[], label="Object",
+                                                      interactive=True)
+                        add_edge_btn = gr.Button("Add edge")
+                        edge_del_dd = gr.Dropdown(choices=[], label="Existing edge",
+                                                  interactive=True)
+                        del_edge_btn = gr.Button("Delete edge")
+                        apply_btn = gr.Button("Apply to therapy session",
+                                              variant="primary")
+                        repair_status = gr.Markdown("")
 
-            live_btn.click(_load_live, [session_state], load_outputs)
-            json_btn.click(_load_json, [json_file], load_outputs)
-            neo_btn.click(_load_neo4j, [neo_uri, neo_user, neo_pw], load_outputs)
+            load_outputs = [handle_state, summary_md, query_graph_panel, query_chat, question_box]
+            repair_dds = [repair_node_dd, edge_subj_dd, edge_obj_dd, edge_del_dd]
+            repair_outputs = [summary_md, query_graph_panel] + repair_dds + [repair_status]
+
+            live_btn.click(_load_live, [session_state], load_outputs).then(
+                _repair_controls, [handle_state], repair_dds)
+            json_btn.click(_load_json, [json_file], load_outputs).then(
+                _repair_controls, [handle_state], repair_dds)
+            neo_btn.click(_load_neo4j, [neo_uri, neo_user, neo_pw], load_outputs).then(
+                _repair_controls, [handle_state], repair_dds)
+
+            repair_node_dd.change(_pick_node, [handle_state, repair_node_dd],
+                                  [repair_label_dd, repair_props_box])
+            save_node_btn.click(
+                _save_node,
+                [handle_state, repair_node_dd, repair_label_dd, repair_props_box],
+                repair_outputs)
+            del_node_btn.click(_delete_node_ui, [handle_state, repair_node_dd],
+                               repair_outputs)
+            add_edge_btn.click(
+                _add_edge_ui,
+                [handle_state, edge_subj_dd, edge_pred_dd, edge_obj_dd],
+                repair_outputs)
+            del_edge_btn.click(_delete_edge_ui, [handle_state, edge_del_dd],
+                               repair_outputs)
+            apply_btn.click(_apply_to_session, [handle_state, session_state],
+                            [session_bar, graph_panel, repair_status])
 
             ask_btn.click(
                 _query_ask, [handle_state, question_box, query_chat],

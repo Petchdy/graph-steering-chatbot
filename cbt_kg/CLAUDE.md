@@ -166,6 +166,39 @@ Tier B (every `CONSOLIDATE_EVERY` turns, detached background task):
 8. Return `{reply, technique, phase, extraction_mode, new_nodes, new_edges,
    graph_snapshot}`.
 
+### Graph repair + conversation branching
+
+`GraphStore` carries two extra capability groups beyond extraction:
+
+- **Editing** — `update_node` / `delete_node` / `delete_edge` / `replace_all`.
+  Because every reply is built from `graph.cbt_context()`, a correction lands on
+  the very next turn; that is what makes "load → fix → keep talking" work.
+  `replace_all` rebuilds the label counters from the incoming ids, or freshly
+  extracted nodes would reuse an id the corrected graph already holds.
+- **Checkpointing** — `export_state` / `import_state`, used by
+  `therapy.snapshot_session` / `restore_session`.
+
+In the UI this is driven by Gradio's **native** message editing: the Tab 1
+chatbot sets `editable="user"`, so the pencil beside a client message fires
+`chatbot.edit()` → `_on_edit_message`. `_message_index_to_turn` counts user
+messages rather than doing index arithmetic, because the chat opens with the
+therapist's INTRO and a failed turn contributes no assistant message.
+
+Both chatbots pass `buttons=["copy"]`. Gradio's default includes **`"share"`**,
+which opens a Hugging Face Spaces Discussions panel — meaningless outside Spaces
+and easily mistaken for a bug. Don't drop the explicit `buttons` list.
+
+`async_turn` checkpoints *before* mutating anything, so `edit_turn(session,
+turn_index, new_message)` can restore the exact pre-turn context and replay it
+with different words. The superseded timeline is archived as a branch rather
+than dropped, so `switch_branch` restores dialogue **and graph** together —
+switching versions is not just a text swap. `MAX_CHECKPOINTS` (default 40)
+bounds memory; older turns stop being rewritable.
+
+Neo4j implements the same contract, but `replace_all` there is a destructive
+`DETACH DELETE` + rewrite of the whole `:ABox` — correct, but branching against
+Neo4j is expensive in a way it is not in memory.
+
 ### Graph stores (graph_memory.py, graph_neo4j.py)
 
 `InMemoryGraphStore.reset()` pre-creates one placeholder node per class plus
@@ -246,6 +279,11 @@ renders its own `<canvas>` + inspector panel and never calls them.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/chat` | Send a client turn; returns `reply`, `technique`, `phase`, `new_nodes`, `new_edges`, `graph_snapshot` |
+| `POST` | `/graph/edit` | One correction to a live session graph (`update_node`/`delete_node`/`add_node`/`add_edge`/`delete_edge`) |
+| `POST` | `/graph/apply` | Replace a session's graph wholesale with a corrected one (Stage 5 shape) |
+| `GET` | `/branches/{session_id}` | Branches + which turns still have a checkpoint |
+| `POST` | `/chat/edit` | Rewrite a past client turn and replay it against its original context |
+| `POST` | `/chat/branch` | Switch to a previously recorded branch |
 | `GET` | `/strategies` | Steering strategies, proxied from the steering service; returns just `["none"]` when it is unreachable. It does **not** check `GENERATOR`, so it lists strategies whenever the service is up — even under `GENERATOR=local`, where picking one has no effect |
 | `POST` | `/reset` | Wipe and reinitialise the session graph |
 | `GET` | `/graph/{session_id}` | Cytoscape.js JSON of the live graph |

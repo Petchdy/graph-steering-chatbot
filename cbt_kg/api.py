@@ -19,7 +19,8 @@ from pydantic import BaseModel
 from . import factory
 from .graph_memory import cytoscape_render
 from .interfaces import GraphEdge, GraphNode
-from .therapy import Session, async_turn
+from .therapy import (Session, async_turn, edit_turn, editable_turns,
+                      list_branches, switch_branch)
 
 app = FastAPI(title="CBT V4_flat Chatbot")
 
@@ -224,6 +225,147 @@ def graph_preview(handle: str) -> dict:
         return {"nodes": [], "edges": []}
     nodes, edges, _ = _query_graphs[handle]
     return cytoscape_render(nodes, edges)
+
+
+# ────────────── Graph repair — fix the graph, keep talking ───────────────
+
+class GraphEditRequest(BaseModel):
+    session_id: str
+    op: str                       # update_node | delete_node | add_node | add_edge | delete_edge
+    node_id: Optional[str] = None
+    label: Optional[str] = None
+    props: Optional[dict] = None
+    status: Optional[str] = None
+    subject_id: Optional[str] = None
+    predicate: Optional[str] = None
+    object_id: Optional[str] = None
+    edge_id: Optional[str] = None
+
+
+class ApplyGraphRequest(BaseModel):
+    """A corrected graph in the V4_flat Stage 5 export shape."""
+    session_id: str
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+
+@app.post("/graph/edit")
+def graph_edit(req: GraphEditRequest) -> dict:
+    """Apply one therapist correction to a live session graph.
+
+    The conversation continues against the corrected graph: the next reply is
+    built from graph.cbt_context(), so edits take effect on the very next turn.
+    """
+    if req.session_id not in _sessions:
+        raise HTTPException(404, "session_id not found")
+    g = _sessions[req.session_id].graph
+    op = req.op
+    if op == "update_node":
+        node = g.update_node(req.node_id or "", props=req.props,
+                             label=req.label, status=req.status)
+        if node is None:
+            raise HTTPException(404, f"node {req.node_id} not found")
+        ok = True
+    elif op == "delete_node":
+        ok = g.delete_node(req.node_id or "")
+    elif op == "add_node":
+        if not req.label:
+            raise HTTPException(400, "add_node needs a label")
+        g.upsert_node(req.label, req.props or {},
+                      _sessions[req.session_id].turn_count)
+        ok = True
+    elif op == "add_edge":
+        if not (req.subject_id and req.predicate and req.object_id):
+            raise HTTPException(400, "add_edge needs subject_id, predicate, object_id")
+        g.add_edge(req.subject_id, req.predicate, req.object_id)
+        ok = True
+    elif op == "delete_edge":
+        ok = g.delete_edge(req.edge_id or "")
+    else:
+        raise HTTPException(400, f"unknown op {op}")
+    if not ok:
+        raise HTTPException(404, "target not found")
+    nodes, edges = g.nodes(), g.edges()
+    return {"ok": True, "counts": _summarize(nodes, edges),
+            "graph_snapshot": g.snapshot()}
+
+
+@app.post("/graph/apply")
+def graph_apply(req: ApplyGraphRequest) -> dict:
+    """Replace a session's graph wholesale with a corrected/loaded one."""
+    if req.session_id not in _sessions:
+        raise HTTPException(404, "session_id not found")
+    nodes = [GraphNode(node_id=str(n.get("id")), label=str(n.get("label")),
+                       props=dict(n.get("properties") or n.get("props") or {}),
+                       status=str(n.get("status") or "found"),
+                       evidence=list(n.get("evidence") or []))
+             for n in req.nodes]
+    edges = [GraphEdge(subject_id=str(e.get("from") or e.get("subject_id")),
+                       predicate=str(e.get("type") or e.get("predicate")),
+                       object_id=str(e.get("to") or e.get("object_id")),
+                       props=dict(e.get("props") or {}),
+                       status=str(e.get("status") or "found"),
+                       evidence=list(e.get("evidence") or []))
+             for e in req.edges]
+    g = _sessions[req.session_id].graph
+    g.replace_all(nodes, edges)
+    return {"ok": True, "counts": _summarize(nodes, edges),
+            "graph_snapshot": g.snapshot()}
+
+
+# ────────────── Branching — alternate client turns ───────────────────────
+
+class EditTurnRequest(BaseModel):
+    session_id: str
+    turn_index: int
+    message: str
+    strategy: Optional[str] = None
+
+
+class SwitchBranchRequest(BaseModel):
+    session_id: str
+    branch_id: str
+
+
+@app.get("/branches/{session_id}")
+def branches(session_id: str) -> dict:
+    if session_id not in _sessions:
+        raise HTTPException(404, "session_id not found")
+    s = _sessions[session_id]
+    return {"branches": list_branches(s), "editable_turns": editable_turns(s),
+            "active_branch": s.active_branch}
+
+
+@app.post("/chat/edit")
+def chat_edit(req: EditTurnRequest) -> dict:
+    """Rewrite a past client turn and replay it against its original context."""
+    if req.session_id not in _sessions:
+        raise HTTPException(404, "session_id not found")
+    s = _sessions[req.session_id]
+    if req.strategy is not None and hasattr(s.generator, "set_strategy"):
+        s.generator.set_strategy(req.strategy)
+    try:
+        result = edit_turn(s, req.turn_index, req.message)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"reply": result.get("reply", ""), "technique": result.get("technique", ""),
+            "phase": result.get("phase", ""), "branch_id": result.get("branch_id"),
+            "branches": result.get("branches", []),
+            "history": [list(h) for h in s.history],
+            "graph_snapshot": s.graph.snapshot()}
+
+
+@app.post("/chat/branch")
+def chat_branch(req: SwitchBranchRequest) -> dict:
+    if req.session_id not in _sessions:
+        raise HTTPException(404, "session_id not found")
+    s = _sessions[req.session_id]
+    try:
+        out = switch_branch(s, req.branch_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {**out, "history": [list(h) for h in s.history],
+            "graph_snapshot": s.graph.snapshot()}
 
 
 # ─────────────────────────── Mount Gradio UI ────────────────────────────

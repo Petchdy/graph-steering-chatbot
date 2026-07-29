@@ -38,6 +38,19 @@ def utterance_id(turn_index: int, speaker: str) -> str:
     return f"utt_{turn_index}" if speaker == "client" else f"utt_{turn_index}_t"
 
 
+def _copy_node(n: GraphNode) -> GraphNode:
+    return GraphNode(node_id=n.node_id, label=n.label, props=dict(n.props),
+                     status=n.status, evidence=list(n.evidence),
+                     turn_acquired=n.turn_acquired)
+
+
+def _copy_edge(e: GraphEdge) -> GraphEdge:
+    return GraphEdge(subject_id=e.subject_id, predicate=e.predicate,
+                     object_id=e.object_id, props=dict(e.props),
+                     status=e.status, evidence=list(e.evidence),
+                     turn_acquired=e.turn_acquired)
+
+
 def _jaccard(a: str, b: str) -> float:
     sa = set(a.lower().split())
     sb = set(b.lower().split())
@@ -190,6 +203,84 @@ class InMemoryGraphStore:
                     if ev not in existing.evidence:
                         existing.evidence.append(ev)
             return existing
+
+    # ─────────────────────── editing / checkpointing ───────────────────
+
+    def update_node(self, node_id: str, props: dict | None = None,
+                    label: str | None = None,
+                    status: str | None = None) -> GraphNode | None:
+        """Apply a therapist correction to one node. Returns None if unknown."""
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if node is None:
+                return None
+            if props is not None:
+                node.props = dict(props)
+            if label:
+                node.label = label
+            if status:
+                node.status = status
+            return node
+
+    def delete_node(self, node_id: str) -> bool:
+        with self._lock:
+            if node_id not in self._nodes:
+                return False
+            del self._nodes[node_id]
+            # Edges to a deleted node would dangle, so drop them with it.
+            for key in [k for k, e in self._edges.items()
+                        if e.subject_id == node_id or e.object_id == node_id]:
+                del self._edges[key]
+            return True
+
+    def delete_edge(self, edge_id: str) -> bool:
+        with self._lock:
+            if edge_id in self._edges:
+                del self._edges[edge_id]
+                return True
+            return False
+
+    def replace_all(self, nodes: list[GraphNode],
+                    edges: list[GraphEdge]) -> None:
+        """Swap in a whole graph — a corrected one, or a restored checkpoint.
+
+        Label counters are rebuilt from the incoming ids so freshly extracted
+        nodes cannot collide with ids that already exist in the new graph.
+        """
+        with self._lock:
+            self._nodes = {n.node_id: n for n in nodes}
+            self._edges = {e.edge_id: e for e in edges}
+            self._label_counters = {}
+            for n in nodes:
+                prefix = ID_PREFIX.get(n.label, n.label.lower())
+                suffix = n.node_id[len(prefix) + 1:] if n.node_id.startswith(prefix + "_") else ""
+                num = int(suffix) if suffix.isdigit() else 0
+                if num > self._label_counters.get(n.label, 0):
+                    self._label_counters[n.label] = num
+
+    def export_state(self) -> dict:
+        """Deep-copied full state — everything a branch needs to be restored."""
+        with self._lock:
+            return {
+                "nodes": [_copy_node(n) for n in self._nodes.values()],
+                "edges": [_copy_edge(e) for e in self._edges.values()],
+                "label_counters": dict(self._label_counters),
+                "session_phase": self._session_phase,
+                "active_technique": self._active_technique,
+            }
+
+    def import_state(self, state: dict) -> None:
+        self.replace_all([_copy_node(n) for n in state.get("nodes", [])],
+                         [_copy_edge(e) for e in state.get("edges", [])])
+        with self._lock:
+            # replace_all rebuilt counters from ids; the snapshot's own counters
+            # are authoritative where higher (a node may since have been deleted).
+            for label, num in (state.get("label_counters") or {}).items():
+                if num > self._label_counters.get(label, 0):
+                    self._label_counters[label] = num
+            self._session_phase = state.get("session_phase", "Rapport")
+            self._active_technique = state.get("active_technique",
+                                               "Rapport Building")
 
     # ─────────────────────────── readers ──────────────────────────────
 

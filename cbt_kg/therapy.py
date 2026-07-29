@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from dataclasses import dataclass, field
 
 from .interfaces import Extractor, Generator, GraphStore, Schema
@@ -44,6 +45,9 @@ def validate_phase(proposed: str, current: str, graph: GraphStore,
     return proposed if (classes_met and turns_met) else current
 
 
+MAX_CHECKPOINTS = int(os.environ.get("MAX_CHECKPOINTS", "40"))
+
+
 @dataclass
 class Session:
     schema: Schema
@@ -54,6 +58,36 @@ class Session:
     turn_count: int = 0
     extraction_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     transcript: list[tuple[int, str, str]] = field(default_factory=list)
+    # Branching: state captured *before* each turn, so a client message can be
+    # rewritten and replayed against the context it originally had.
+    checkpoints: dict[int, dict] = field(default_factory=dict)
+    branches: list[dict] = field(default_factory=list)
+    active_branch: str | None = None
+
+
+# ─────────────────────── Snapshot / restore ───────────────────────────────
+
+def snapshot_session(session: Session) -> dict:
+    """Everything that makes a timeline: dialogue, counters, and graph.
+
+    `checkpoints` are carried along by reference — they are written once and
+    never mutated in place, so branches can share them without copying.
+    """
+    return {
+        "history": list(session.history),
+        "transcript": list(session.transcript),
+        "turn_count": session.turn_count,
+        "graph_state": session.graph.export_state(),
+        "checkpoints": dict(session.checkpoints),
+    }
+
+
+def restore_session(session: Session, snap: dict) -> None:
+    session.history = list(snap["history"])
+    session.transcript = list(snap["transcript"])
+    session.turn_count = snap["turn_count"]
+    session.checkpoints = dict(snap.get("checkpoints") or {})
+    session.graph.import_state(snap["graph_state"])
 
 
 # ─────────────────────── Sync wrapper (tests / Gradio) ────────────────────
@@ -74,6 +108,13 @@ def turn(session: Session, user_message: str) -> dict:
 # ─────────────────────── Async core ───────────────────────────────────────
 
 async def async_turn(session: Session, user_message: str) -> dict:
+    # Checkpoint BEFORE any mutation, so this turn can later be replayed with a
+    # different client message against exactly the context it had here.
+    session.checkpoints[session.turn_count + 1] = snapshot_session(session)
+    if len(session.checkpoints) > MAX_CHECKPOINTS:
+        for stale in sorted(session.checkpoints)[:-MAX_CHECKPOINTS]:
+            del session.checkpoints[stale]
+
     session.turn_count += 1
     turn_index = session.turn_count
 
@@ -204,3 +245,94 @@ def _build_window(history: list[tuple[str, str]], n: int = 2) -> list[tuple[str,
         window.append(("client", user))
         window.append(("therapist", assistant))
     return window
+
+
+# ─────────────────────── Branching (alternate client turns) ───────────────
+
+def _client_message_at(session: Session, turn_index: int) -> str:
+    for ti, speaker, text in session.transcript:
+        if ti == turn_index and speaker == "client":
+            return text
+    idx = turn_index - 1
+    if 0 <= idx < len(session.history):
+        return session.history[idx][0]
+    return ""
+
+
+def _branch_label(turn_index: int, message: str) -> str:
+    trimmed = " ".join((message or "").split())
+    if len(trimmed) > 48:
+        trimmed = trimmed[:48] + "…"
+    return f"turn {turn_index}: {trimmed}" if trimmed else f"turn {turn_index}"
+
+
+def _archive_current(session: Session, turn_index: int) -> None:
+    """Persist the timeline as it stands so switching back returns to it."""
+    snap = snapshot_session(session)
+    if session.active_branch:
+        for b in session.branches:
+            if b["id"] == session.active_branch:
+                b["state"] = snap
+                return
+    message = _client_message_at(session, turn_index)
+    bid = uuid.uuid4().hex[:8]
+    session.branches.append({
+        "id": bid, "turn_index": turn_index, "message": message,
+        "label": _branch_label(turn_index, message), "state": snap,
+    })
+    session.active_branch = bid
+
+
+def edit_turn(session: Session, turn_index: int, new_message: str) -> dict:
+    """Replay `turn_index` with a different client message.
+
+    The context before that turn is preserved exactly (from its checkpoint);
+    everything the original timeline said from that turn onward is kept as a
+    switchable branch rather than discarded.
+    """
+    checkpoint = session.checkpoints.get(turn_index)
+    if checkpoint is None:
+        raise ValueError(
+            f"no checkpoint for turn {turn_index} — it is either beyond the "
+            f"session or older than the last {MAX_CHECKPOINTS} turns"
+        )
+    _archive_current(session, turn_index)
+    restore_session(session, checkpoint)
+    session.active_branch = None
+    result = turn(session, new_message)
+    bid = uuid.uuid4().hex[:8]
+    session.branches.append({
+        "id": bid, "turn_index": turn_index, "message": new_message,
+        "label": _branch_label(turn_index, new_message),
+        "state": snapshot_session(session),
+    })
+    session.active_branch = bid
+    return {**result, "branch_id": bid, "branches": list_branches(session)}
+
+
+def switch_branch(session: Session, branch_id: str) -> dict:
+    """Restore a previously recorded timeline, graph and all."""
+    target = next((b for b in session.branches if b["id"] == branch_id), None)
+    if target is None:
+        raise ValueError(f"unknown branch {branch_id}")
+    if session.active_branch and session.active_branch != branch_id:
+        # Keep whatever has been said since this branch was made current.
+        for b in session.branches:
+            if b["id"] == session.active_branch:
+                b["state"] = snapshot_session(session)
+                break
+    restore_session(session, target["state"])
+    session.active_branch = branch_id
+    return {"branch_id": branch_id, "branches": list_branches(session)}
+
+
+def list_branches(session: Session) -> list[dict]:
+    return [{"id": b["id"], "turn_index": b["turn_index"],
+             "message": b["message"], "label": b["label"],
+             "active": b["id"] == session.active_branch}
+            for b in session.branches]
+
+
+def editable_turns(session: Session) -> list[int]:
+    """Client turns that still have a checkpoint, so can be rewritten."""
+    return sorted(t for t in session.checkpoints if t <= session.turn_count)

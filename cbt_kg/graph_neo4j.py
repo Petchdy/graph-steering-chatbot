@@ -326,6 +326,93 @@ class Neo4jGraphStore:
             status="found", evidence=[turn_index], turn_acquired=turn_index,
         )
 
+    # ─────────────────────── editing / checkpointing ───────────────────
+
+    def update_node(self, node_id: str, props: dict | None = None,
+                    label: str | None = None,
+                    status: str | None = None) -> GraphNode | None:
+        with self._lock:
+            with self._driver.session() as s:
+                rec = s.run("MATCH (n:ABox {id:$id}) RETURN n.primaryLabel AS lbl",
+                            id=node_id).single()
+                if rec is None:
+                    return None
+                new_label = label or rec["lbl"]
+                if props is not None:
+                    s.run("MATCH (n:ABox {id:$id}) SET n = $props, n.id=$id, "
+                          "n.primaryLabel=$lbl",
+                          id=node_id, props=self._safe_props(props), lbl=new_label)
+                if label and label != rec["lbl"]:
+                    # primaryLabel drives every read path; swap the Neo4j label too.
+                    s.run(f"MATCH (n:ABox {{id:$id}}) REMOVE n:`{rec['lbl']}` "
+                          f"SET n:`{label}`, n.primaryLabel=$lbl",
+                          id=node_id, lbl=label)
+                return GraphNode(node_id=node_id, label=new_label,
+                                 props=dict(props or {}), status=status or "found")
+
+    def delete_node(self, node_id: str) -> bool:
+        with self._lock:
+            with self._driver.session() as s:
+                rec = s.run("MATCH (n:ABox {id:$id}) DETACH DELETE n "
+                            "RETURN count(*) AS n", id=node_id).single()
+                return bool(rec and rec["n"])
+
+    def delete_edge(self, edge_id: str) -> bool:
+        subj, _, rest = edge_id.partition("__")
+        pred, _, obj = rest.partition("__")
+        rel = REL_TYPE.get(pred)
+        if not rel:
+            return False
+        with self._lock:
+            with self._driver.session() as s:
+                rec = s.run(f"MATCH (a:ABox {{id:$sid}})-[r:`{rel}`]->(b:ABox {{id:$oid}}) "
+                            f"DELETE r RETURN count(*) AS n",
+                            sid=subj, oid=obj).single()
+                return bool(rec and rec["n"])
+
+    def replace_all(self, nodes: list[GraphNode],
+                    edges: list[GraphEdge]) -> None:
+        """Destructive: wipes this database's :ABox and rewrites it.
+
+        Unlike the in-memory store there is no cheap copy-on-write here — a
+        branch switch rewrites the whole graph, so branching against Neo4j is
+        correct but expensive.
+        """
+        with self._lock:
+            with self._driver.session() as s:
+                s.run("MATCH (n:ABox) DETACH DELETE n")
+        for n in nodes:
+            with self._lock:
+                with self._driver.session() as s:
+                    s.run(f"MERGE (x:`{n.label}`:ABox {{id:$id}}) "
+                          f"SET x += $props, x.primaryLabel=$label",
+                          id=n.node_id, props=self._safe_props(n.props),
+                          label=n.label)
+        for e in edges:
+            rel = REL_TYPE.get(e.predicate)
+            if not rel:
+                continue
+            with self._lock:
+                with self._driver.session() as s:
+                    s.run(f"MATCH (a:ABox {{id:$sid}}),(b:ABox {{id:$oid}}) "
+                          f"MERGE (a)-[r:`{rel}`]->(b) SET r += $props",
+                          sid=e.subject_id, oid=e.object_id,
+                          props=self._safe_props(e.props))
+
+    def export_state(self) -> dict:
+        return {
+            "nodes": self.nodes(),
+            "edges": self.edges(),
+            "session_phase": self._session_phase,
+            "active_technique": self._active_technique,
+        }
+
+    def import_state(self, state: dict) -> None:
+        self.replace_all(list(state.get("nodes", [])),
+                         list(state.get("edges", [])))
+        self.apply_session_state(state.get("session_phase", "Rapport"),
+                                 state.get("active_technique", "Rapport Building"))
+
     def _ensure_utterance_locked(self, s, turn_index: int) -> None:
         # Only the id/turnIndex scaffold — speaker/text arrive via record_utterance,
         # which MERGEs onto this same id.
