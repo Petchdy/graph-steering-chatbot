@@ -135,20 +135,36 @@ Tier A (every client turn, background asyncio Task):
    `Reaction.valence` + `Situation.temporality` from lexicons.
 4. **MERGE** — string-Jaccard against existing nodes (handled inside
    `GraphStore.upsert_node`).
-5. **EDGES (local)** — Stage 3 anchor prompt restricted to per-turn-safe
-   predicates: `triggers`, `leadsTo`, `stemsFrom`, `manifestsAs`,
-   `givesRiseTo`, `influencesPerceptionOf`, `associatedWith`. Skipped here
-   (deferred to Tier B): `reinforces`, `hasAdaptiveResponse`, `produces`,
-   `becomesSituation`.
+5. **EDGES (local)** — Stage 3 Pass A anchor prompt, one call per new node with
+   that node as the relation *subject*. It offers **every** `ANCHOR_FAMILIES`
+   predicate, not a whitelist: what actually fires depends on which compatible
+   object nodes already exist. Beware the filter in `_resolve_local_edges` —
+   `PER_TURN_SAFE_PREDICATES` is built from all of `ANCHOR_FAMILIES`, so it is a
+   no-op, and both its name and the inline comment are vestigial. The only
+   relation genuinely excluded here is `reinforces`, which is Pass B and not in
+   `ANCHOR_FAMILIES` at all.
+6. **RETRY (targeted)** — a node can only be a relation subject on the turn it is
+   created, so an old node whose object did not exist yet would be stuck forever.
+   `_unblocked_subjects` does a bounded BFS out from this turn's new nodes to find
+   nearby "orphan" nodes (no outgoing relation) that could now point at them, and
+   re-runs step 5 for just those.
 
 Tier B (every `CONSOLIDATE_EVERY` turns, detached background task):
 
 1. **SESSION-LEVEL** extract over the whole transcript so far
    (`CoreBelief`, `IntermediateBelief`, `Problem`, `Goal`, `Intervention`,
    `Homework`, `AdaptiveResponse`).
-2. **REINFORCES** — wide-window `Reaction × CoreBelief`.
-3. **REFRAME sub-graph** — `hasAdaptiveResponse` / `produces` / `appliedTo`.
-4. **STRUCTURE** — deterministic `Client hasSession Session`,
+2. **EDGES (wide)** — the same Pass A anchor prompt as Tier A, run over the nodes
+   the session-level pass just added, with the full transcript as context. This
+   is where `appliedTo` / `produces` / `targets` / `targetsProblem` actually come
+   from: their subjects (`Intervention`, `Homework`, `Goal`) are only ever created
+   here, never in Tier A.
+3. **REINFORCES** — Pass B wide-window `Reaction × CoreBelief`. The one relation
+   that is never per-turn-safe: it needs the full cross-product, and absence is
+   clinically meaningful, so it is never guessed locally.
+4. **REFRAME sub-graph** — heuristic Jaccard-overlap `hasAdaptiveResponse`
+   fallback for what the step-2 anchor prompt missed. Best-effort, no LLM call.
+5. **STRUCTURE** — deterministic `Client hasSession Session`,
    `Session hasProblem/hasIntervention/hasHomework`, `Goal targetsProblem`.
 
 ### Async turn loop (therapy.async_turn)

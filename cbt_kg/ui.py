@@ -65,6 +65,57 @@ _NODE_CLASSES = [
     "Client", "Session",
 ]
 
+# ─────────────────────────────────────────────────────────────────────────
+# Demo script — a client side that yields a complete, correct graph
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Ordered deliberately, because the pipeline can only draw an edge when BOTH
+# endpoints already exist and a node may only be a relation subject on the turn
+# it is created (plus the bounded orphan retry). So the concrete Situation →
+# AutomaticThought → Reaction chain comes first and the beliefs it feeds come
+# after, giving `stemsFrom` / `reinforces` real objects to attach to.
+#
+# Each message is written to be extractable: one clear unit per class, in the
+# client's own voice, with the distortion stated rather than implied.
+# Intervention / Homework / Goal nodes are only ever created by Tier B's
+# session-level pass, which fires every CONSOLIDATE_EVERY (6) turns — so the
+# graph is not complete until turn 6, and Consolidation phase additionally
+# needs an AdaptiveResponse plus 12 turns.
+
+DEMO_SCRIPT: list[str] = [
+    # 1 — Situation + AutomaticThought + Reaction, one concrete episode
+    "Last Tuesday in the team meeting my manager asked me a direct question and "
+    "my mind went completely blank. I thought 'everyone can see I'm a fraud'. "
+    "My face burned and I just froze.",
+    # 2 — a second instance, behavioural Reaction (gives the pattern something to generalise from)
+    "It happens most weeks now. Yesterday I stayed quiet in the standup even "
+    "though I knew the answer, because I was sure I'd say something stupid.",
+    # 3 — CoreBelief (self / worthless), now that the evidence for it exists
+    "Underneath it I think I've always believed I'm not good enough. Like I got "
+    "this job by luck and sooner or later they'll find me out.",
+    # 4 — IntermediateBelief: ONE rule. Stating a rule and a should-statement
+    #     together makes Stage 1.2 atomize them into near-duplicate IB nodes.
+    "My rule is that if I don't answer perfectly, people will decide I'm "
+    "incompetent.",
+    # 5 — Goal only. The Problem is already stated in turn 1; restating it here
+    #     produces a second Problem node that Jaccard merging will not catch.
+    "What I want is to speak up in meetings without my heart racing, even if "
+    "what I say isn't perfect.",
+    # 6 — the session wrap-up, and the LAST turn that matters for completeness:
+    #     Tier B fires here (turn_count % CONSOLIDATE_EVERY == 0) and reads the
+    #     transcript *so far*, so AdaptiveResponse / Intervention / Homework must
+    #     already have been said. Left to turn 7 they would not be consolidated
+    #     until turn 12, which is why this turn carries all three.
+    #     The reframe is phrased as the balanced alternative itself, rather than
+    #     as recollection, which reads as just another AutomaticThought.
+    "A more balanced way to see it is this: going blank in one meeting doesn't "
+    "make me a fraud, it means I was caught off guard — I have answered plenty "
+    "of hard questions well before. In today's session we worked through a "
+    "thought record together, and I'll keep filling one in after each meeting "
+    "this week.",
+]
+
+
 INTRO = (
     "Hello, and welcome. I'm glad you're here today. "
     "This is a safe space to talk about whatever is on your mind. "
@@ -75,19 +126,37 @@ INTRO = (
 # Data conversion helper
 # ─────────────────────────────────────────────────────────────────────────
 
+# Never drawn on either canvas: Client/Session are deterministic scaffold and
+# Utterance is raw provenance — none of them are things the model *found*. They
+# stay in the graph itself, and remain editable in Tab 2's repair dropdowns.
+SCAFFOLD_LABELS = ("Client", "Session")
+
+# Hidden from the therapy panel's canvas *and* its legend. Part 2 still draws
+# and lists all three, so its legend keeps the original full set.
+THERAPY_HIDDEN_LABELS = {"Client", "Session", "Utterance"}
+
+
 def _build_canvas_data(
     graph_nodes: list[GraphNode],
     graph_edges: list[GraphEdge],
     skip_utterance: bool = True,
+    skip_scaffold: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Convert GraphNode/GraphEdge lists to canvas-friendly dicts.
 
     Filters out Utterance nodes (too noisy) and edges where BOTH endpoints
     are missing (placeholder-only noise at startup).
+
+    `skip_scaffold` additionally drops Client/Session. They are never extracted
+    from what the client says — `_structure_edges` creates them deterministically
+    — so on the therapy panel they are just fixed furniture that implies the model
+    found something. Tab 2 keeps them, since the structural edges hanging off them
+    (hasSession / hasProblem / hasIntervention) are legitimately editable there.
     """
     filtered_nodes = [
         n for n in graph_nodes
         if not (skip_utterance and n.label == "Utterance")
+        and not (skip_scaffold and n.label in SCAFFOLD_LABELS)
     ]
     node_ids = {n.node_id for n in filtered_nodes}
     node_status = {n.node_id: n.status for n in filtered_nodes}
@@ -214,21 +283,7 @@ canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
     <div class="graph-panel" id="gp">
       <canvas id="gc"></canvas>
       <div class="legend">
-        <div class="leg"><div class="ld" style="background:#E5E7EB;border:1px solid #D1D5DB;"></div>Client</div>
-        <div class="leg"><div class="ld" style="background:#E5E7EB;border:1px solid #D1D5DB;"></div>Session</div>
-        <div class="leg"><div class="ld" style="background:#F87171;border:1px solid #EF4444;border-radius:2px;"></div>Problem</div>
-        <div class="leg"><div class="ld" style="background:#34D399;border:1px solid #10B981;border-radius:2px;"></div>Goal</div>
-        <div class="leg"><div class="ld" style="background:#A78BFA;border:1px solid #8B5CF6;"></div>Intervention</div>
-        <div class="leg"><div class="ld" style="background:#FBBF24;border:1px solid #F59E0B;"></div>Homework</div>
-        <div style="width:100%;height:0;"></div>
-        <div class="leg"><div class="ld" style="background:#9D174D;border:1px solid #831843;"></div>CoreBelief</div>
-        <div class="leg"><div class="ld" style="background:#BE185D;border:1px solid #9D174D;"></div>IntermBelief</div>
-        <div class="leg"><div class="ld" style="background:#FDE047;border:1px solid #FACC15;"></div>Situation</div>
-        <div class="leg"><div class="ld" style="background:#6EE7B7;border:1px solid #34D399;"></div>AutoThought</div>
-        <div class="leg"><div class="ld" style="background:#FCA5A5;border:1px solid #F87171;"></div>Reaction</div>
-        <div class="leg"><div class="ld" style="background:#D1FAE5;border:1px solid #6EE7B7;"></div>AdaptResponse</div>
-        <div style="width:100%;height:0;"></div>
-        <div class="leg"><div class="ld" style="background:#D1D5DB;border:1px solid #9CA3AF;"></div>Utterance</div>
+__LEGEND__
         <div class="leg"><div style="width:16px;height:1.5px;background:#1D9E75;"></div>Found</div>
         <div class="leg" id="legPlaceholderEdge"><div style="width:16px;height:1.5px;background:repeating-linear-gradient(90deg,#bbb 0,#bbb 3px,transparent 3px,transparent 6px);"></div>Placeholder</div>
       </div>
@@ -715,13 +770,24 @@ function showEdgePanel(e) {
     '<button class="del" onclick="deleteEdge(&quot;'+esc(e.id)+'&quot;)">Delete</button>');
 }
 
+// Push the edited graph up to the Gradio page. The canvas lives in an iframe
+// srcdoc, so this postMessage is the only channel back to Python — without it
+// edits would redraw here and be lost on the next re-render.
+function syncGraph() {
+  if (!EDIT_MODE) return;
+  try {
+    parent.postMessage({kind:'cbt_graph_sync',
+                        nodes: nodes.concat(hiddenNodes), edges: edges}, '*');
+  } catch (err) {}
+}
+
 function saveNode(id) {
   const n = nodes.find(function(x){return x.id===id;});
   if (!n) return;
   n.label = document.getElementById('dpClass').value;
   n.status = document.getElementById('dpStatus').value;
   try { n.props = JSON.parse(document.getElementById('dpProps').value||'{}'); } catch(err) {}
-  draw(); showNodePanel(n);
+  draw(); syncGraph(); showNodePanel(n);
 }
 function saveEdge(id) {
   const e = edges.find(function(x){return x.id===id;});
@@ -730,16 +796,16 @@ function saveEdge(id) {
   e.from = document.getElementById('dpFrom').value;
   e.to   = document.getElementById('dpTo').value;
   e.status = document.getElementById('dpEdgeStatus').value;
-  draw(); showEdgePanel(e);
+  draw(); syncGraph(); showEdgePanel(e);
 }
 function deleteNode(id) {
   nodes = nodes.filter(function(n){return n.id!==id;});
   edges = edges.filter(function(e){return e.from!==id && e.to!==id;});
-  clearSelection(); draw();
+  clearSelection(); draw(); syncGraph();
 }
 function deleteEdge(id) {
   edges = edges.filter(function(e){return e.id!==id;});
-  clearSelection(); draw();
+  clearSelection(); draw(); syncGraph();
 }
 
 // ── Edge creation modal ───────────────────────────────────────────────────
@@ -765,7 +831,7 @@ function showCreateEdge(fromId, toId) {
 }
 function confirmEdge(from, to) {
   edges.push({id:'e'+Date.now(), from:from, to:to, predicate:document.getElementById('mPred').value, status:'found', evidence:[], props:{}});
-  closeModal(); updateTitle(); draw();
+  closeModal(); updateTitle(); draw(); syncGraph();
 }
 
 // ── Node creation modal ───────────────────────────────────────────────────
@@ -791,7 +857,7 @@ function confirmNode() {
   nodes.push({id:cls.toLowerCase().slice(0,3)+'_'+Date.now(), label:cls,
     x:60+Math.random()*(W-120), y:60+Math.random()*(H-120),
     status:'found', props:propKey?{[propKey]:txt}:{}, evidence:[]});
-  closeModal(); updateTitle(); draw();
+  closeModal(); updateTitle(); draw(); syncGraph();
 }
 
 function saveJSON() {
@@ -838,12 +904,49 @@ updateTitle();
 </html>'''
 
 
+# Full legend, in the original grouping — `None` marks a full-width row break.
+# Part 2 renders all of it; Part 1 hides the classes it does not draw.
+_LEGEND_ORDER = [
+    "Client", "Session", "Problem", "Goal", "Intervention", "Homework", None,
+    "CoreBelief", "IntermediateBelief", "Situation", "AutomaticThought",
+    "Reaction", "AdaptiveResponse", None, "Utterance",
+]
+_RECT_LEGEND = {"Problem", "Goal"}
+
+
+def _legend_html(hide_labels: set[str] | None = None,
+                 row_breaks: bool = True) -> str:
+    """Build the legend from NODE_COLORS so it can't drift from what is drawn.
+
+    `row_breaks` keeps the original fixed grouping (Part 2, full list). Part 1
+    filters classes out and turns them off, letting `.legend`'s flex-wrap
+    re-flow instead — fixed breaks leave the rows lopsided once entries go.
+    """
+    hide_labels = hide_labels or set()
+    out: list[str] = []
+    for label in _LEGEND_ORDER:
+        if label is None:
+            if row_breaks:
+                out.append('<div style="width:100%;height:0;"></div>')
+            continue
+        if label in hide_labels:
+            continue
+        fill, stroke, _text = NODE_COLORS[label]
+        radius = "border-radius:2px;" if label in _RECT_LEGEND else ""
+        out.append(
+            f'<div class="leg"><div class="ld" style="background:{fill};'
+            f'border:1px solid {stroke};{radius}"></div>{label}</div>'
+        )
+    return "\n        ".join(out)
+
+
 def _render_canvas(
     canvas_nodes: list[dict],
     canvas_edges: list[dict],
     edit_mode: bool = False,
     height: int = 610,
     hidden_nodes: list[dict] | None = None,
+    hide_legend_labels: set[str] | None = None,
 ) -> str:
     """Render the canvas graph as an iframe srcdoc string.
 
@@ -864,6 +967,8 @@ def _render_canvas(
         .replace("__NODES__", nodes_json)
         .replace("__EDGES__", edges_json)
         .replace("__HIDDEN_NODES__", hidden_json)
+        .replace("__LEGEND__", _legend_html(hide_legend_labels,
+                                            row_breaks=not hide_legend_labels))
         .replace("__EDIT_MODE__", edit_str)
         .replace("__COLOR__", color_json)
         .replace("__BADGE_BG__", badge_bg_json)
@@ -947,8 +1052,10 @@ def _bot_respond(message: str, history: list, session: Session, strategy: str = 
     technique = result["technique"]
     bar_html = _session_bar_html(phase, technique, session.turn_count, strategy,
                                   result.get("steer_status"))
-    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges())
-    graph_html = _render_canvas(nodes, edges, edit_mode=False)
+    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges(),
+                                      skip_scaffold=True)
+    graph_html = _render_canvas(nodes, edges, edit_mode=False,
+                           hide_legend_labels=THERAPY_HIDDEN_LABELS)
     return history, session, bar_html, graph_html
 
 
@@ -956,8 +1063,10 @@ def _reset_therapy():
     session = _new_session()
     history = [{"role": "assistant", "content": INTRO}]
     bar_html = _session_bar_html("Rapport", "Rapport Building", 0)
-    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges())
-    graph_html = _render_canvas(nodes, edges, edit_mode=False)
+    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges(),
+                                      skip_scaffold=True)
+    graph_html = _render_canvas(nodes, edges, edit_mode=False,
+                           hide_legend_labels=THERAPY_HIDDEN_LABELS)
     return history, session, bar_html, graph_html
 
 
@@ -1101,8 +1210,10 @@ def _therapy_view(session: Session, strategy: str, phase: str, technique: str,
                   steer_status: str | None = None):
     bar = _session_bar_html(phase, technique, session.turn_count, strategy,
                             steer_status)
-    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges())
-    return bar, _render_canvas(nodes, edges, edit_mode=False)
+    nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges(),
+                                      skip_scaffold=True)
+    return bar, _render_canvas(nodes, edges, edit_mode=False,
+                           hide_legend_labels=THERAPY_HIDDEN_LABELS)
 
 
 def _message_index_to_turn(chat_history: list, index) -> int:
@@ -1138,7 +1249,7 @@ def _do_rewrite(session: Session, turn_index, new_message: str,
         bar, graph_html = (_therapy_view(session, strategy,
                                          snap.get("session_phase", "Rapport"),
                                          snap.get("active_technique", "Rapport Building"))
-                           if session else ("", _render_canvas([], [])))
+                           if session else ("", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS)))
         return (_history_to_chat(session) if session else [], session, bar,
                 graph_html, branch_dd,
                 "Edit a message of yours to try it a different way.")
@@ -1166,12 +1277,12 @@ def _do_switch_branch(session: Session, branch_id, strategy: str = "none"):
     if session is None or not branch_id:
         branch_dd = _branch_controls(session)
         return ([] if session is None else _history_to_chat(session), session,
-                "", _render_canvas([], []), branch_dd, "No version selected.")
+                "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS), branch_dd, "No version selected.")
     try:
         switch_branch(session, branch_id)
     except ValueError as exc:
         branch_dd = _branch_controls(session)
-        return (_history_to_chat(session), session, "", _render_canvas([], []),
+        return (_history_to_chat(session), session, "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS),
                 branch_dd, f"{exc}")
     snap = session.graph.snapshot()
     bar, graph_html = _therapy_view(
@@ -1186,25 +1297,6 @@ def _do_switch_branch(session: Session, branch_id, strategy: str = "none"):
 # Tab 2 — repairing a loaded graph, then handing it back to the session
 # ─────────────────────────────────────────────────────────────────────────
 
-def _repair_controls(handle):
-    """Rebuild the node/edge pickers from the loaded graph."""
-    if not handle or handle not in _loaded_graphs:
-        empty = gr.update(choices=[], value=None)
-        return empty, empty, empty, empty
-    gnodes, gedges, _ = _loaded_graphs[handle]
-    node_choices = [
-        (f"{n.node_id} · {n.label} · {(_node_text(n) or '')[:34]}", n.node_id)
-        for n in gnodes if n.status == "found"
-    ]
-    edge_choices = [
-        (f"{e.subject_id} –{e.predicate}→ {e.object_id}", e.edge_id)
-        for e in gedges if e.status == "found"
-    ]
-    nodes_dd = gr.update(choices=node_choices, value=None)
-    return (nodes_dd, gr.update(choices=node_choices, value=None),
-            gr.update(choices=node_choices, value=None),
-            gr.update(choices=edge_choices, value=None))
-
 
 def _node_text(n: GraphNode) -> str:
     for k in ("description", "content", "statement", "taskDescription", "text"):
@@ -1214,82 +1306,43 @@ def _node_text(n: GraphNode) -> str:
     return ""
 
 
-def _pick_node(handle, node_id):
-    if not handle or handle not in _loaded_graphs or not node_id:
-        return gr.update(value=None), gr.update(value="{}")
-    gnodes, _, _ = _loaded_graphs[handle]
-    n = next((x for x in gnodes if x.node_id == node_id), None)
-    if n is None:
-        return gr.update(value=None), gr.update(value="{}")
-    return (gr.update(value=n.label),
-            gr.update(value=json.dumps(n.props, ensure_ascii=False, indent=2)))
 
 
-def _refresh_after_repair(handle, message: str):
-    gnodes, gedges, label = _loaded_graphs[handle]
-    n_dd, s_dd, o_dd, e_dd = _repair_controls(handle)
-    return (_summary_text(gnodes, gedges, label),
-            _make_query_graph_html(gnodes, gedges),
-            n_dd, s_dd, o_dd, e_dd, message)
 
 
-def _save_node(handle, node_id, label, props_json):
-    if not handle or handle not in _loaded_graphs or not node_id:
-        return _refresh_after_repair(handle, "Select a node first.") if handle in _loaded_graphs \
-            else (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                  "Load a graph first.")
+
+
+def _sync_canvas_edits(handle, payload: str):
+    """Fold edits made in the canvas back into the loaded graph.
+
+    The canvas is the editor now; this is what makes its buttons persist instead
+    of merely redrawing. Utterances ride along in `hiddenNodes`, so provenance
+    survives an edit-then-apply round trip.
+    """
+    if not handle or handle not in _loaded_graphs or not payload:
+        return gr.update(), gr.update()
     try:
-        props = json.loads(props_json or "{}")
-        if not isinstance(props, dict):
-            raise ValueError("properties must be a JSON object")
-    except Exception as exc:
-        return _refresh_after_repair(handle, f"Invalid properties JSON: {exc}")
-    gnodes, gedges, glabel = _loaded_graphs[handle]
-    for n in gnodes:
-        if n.node_id == node_id:
-            n.props = props
-            if label:
-                n.label = label
-            break
-    _loaded_graphs[handle] = (gnodes, gedges, glabel)
-    return _refresh_after_repair(handle, f"Saved {node_id}.")
-
-
-def _delete_node_ui(handle, node_id):
-    if not handle or handle not in _loaded_graphs or not node_id:
-        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                gr.update(), "Select a node first.")
-    gnodes, gedges, glabel = _loaded_graphs[handle]
-    gnodes = [n for n in gnodes if n.node_id != node_id]
-    gedges = [e for e in gedges
-              if e.subject_id != node_id and e.object_id != node_id]
-    _loaded_graphs[handle] = (gnodes, gedges, glabel)
-    return _refresh_after_repair(handle, f"Deleted {node_id} and its edges.")
-
-
-def _add_edge_ui(handle, subj, pred, obj):
-    if not handle or handle not in _loaded_graphs:
-        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                gr.update(), "Load a graph first.")
-    if not (subj and pred and obj):
-        return _refresh_after_repair(handle, "Pick subject, predicate and object.")
-    gnodes, gedges, glabel = _loaded_graphs[handle]
-    new = GraphEdge(subject_id=subj, predicate=pred, object_id=obj, status="found")
-    if any(e.edge_id == new.edge_id for e in gedges):
-        return _refresh_after_repair(handle, "That edge already exists.")
-    gedges = gedges + [new]
-    _loaded_graphs[handle] = (gnodes, gedges, glabel)
-    return _refresh_after_repair(handle, f"Added {subj} –{pred}→ {obj}.")
-
-
-def _delete_edge_ui(handle, edge_id):
-    if not handle or handle not in _loaded_graphs or not edge_id:
-        return (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-                gr.update(), "Select an edge first.")
-    gnodes, gedges, glabel = _loaded_graphs[handle]
-    gedges = [e for e in gedges if e.edge_id != edge_id]
-    _loaded_graphs[handle] = (gnodes, gedges, glabel)
-    return _refresh_after_repair(handle, "Edge deleted.")
+        data = json.loads(payload)
+    except Exception:
+        return gr.update(), "Could not read the canvas edit."
+    nodes = [
+        GraphNode(node_id=str(n.get("id")), label=str(n.get("label")),
+                  props=dict(n.get("props") or {}),
+                  status=str(n.get("status") or "found"),
+                  evidence=list(n.get("evidence") or []))
+        for n in (data.get("nodes") or []) if n.get("id")
+    ]
+    edges = [
+        GraphEdge(subject_id=str(e.get("from")), predicate=str(e.get("predicate")),
+                  object_id=str(e.get("to")), props=dict(e.get("props") or {}),
+                  status=str(e.get("status") or "found"),
+                  evidence=list(e.get("evidence") or []))
+        for e in (data.get("edges") or []) if e.get("from") and e.get("to")
+    ]
+    label = _loaded_graphs[handle][2]
+    _loaded_graphs[handle] = (nodes, edges, label)
+    return (_summary_text(nodes, edges, label),
+            "Canvas edits saved — *Apply to therapy session* to use them.")
 
 
 def _apply_to_session(handle, session: Session):
@@ -1299,9 +1352,9 @@ def _apply_to_session(handle, session: Session):
     on the very next turn — that is the whole point of the round-trip.
     """
     if session is None:
-        return "", _render_canvas([], []), "No therapy session yet — start one in Tab 1."
+        return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS), "No therapy session yet — start one in Tab 1."
     if not handle or handle not in _loaded_graphs:
-        return "", _render_canvas([], []), "Load a graph first."
+        return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS), "Load a graph first."
     gnodes, gedges, _ = _loaded_graphs[handle]
     session.graph.replace_all(gnodes, gedges)
     snap = session.graph.snapshot()
@@ -1316,7 +1369,38 @@ def _apply_to_session(handle, session: Session):
 
 # ─────────────────────────────────────────────────────────────────────────
 
+# Hides the Trash/"clear" IconButton Gradio bakes into the chatbot toolbar.
+# `buttons=["copy"]` puts the copy control on each message instead, so the
+# component-level wrapper holds nothing else worth keeping here.
+# Injected as a <style> block rather than Blocks(css=...) because Gradio 6 moved
+# that parameter to launch(), which never runs under gr.mount_gradio_app.
+_UI_CSS = """<style>
+#therapy_chat .icon-button-wrapper { display: none !important; }
+#graph_sync { display: none !important; }
+</style>"""
+
+# Installed once on page load: relays the canvas iframe's postMessage into the
+# hidden #graph_sync textbox and fires an input event, which is what Gradio
+# listens for. The timestamp guarantees the value differs every time, so .change
+# still fires when the same edit is repeated.
+_SYNC_JS = """
+() => {
+  if (window.__cbtSyncInstalled) return;
+  window.__cbtSyncInstalled = true;
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.kind !== 'cbt_graph_sync') return;
+    const el = document.querySelector('#graph_sync textarea, #graph_sync input');
+    if (!el) return;
+    el.value = JSON.stringify({nodes: d.nodes, edges: d.edges, t: Date.now()});
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+  });
+}
+"""
+
 with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as demo:
+    gr.HTML(_UI_CSS, visible=True, padding=False)
+    demo.load(None, None, None, js=_SYNC_JS)
     session_state = gr.State(None)
     pending_msg = gr.State("")
 
@@ -1338,6 +1422,9 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                         # Puts a pencil next to that copy button on client
                         # messages; editing one fires .edit() below.
                         editable="user",
+                        # Gradio always renders a Trash/"clear" IconButton with no
+                        # option to disable it; hidden via CSS on this id below.
+                        elem_id="therapy_chat",
                     )
                     with gr.Row():
                         msg_box = gr.Textbox(
@@ -1353,6 +1440,14 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                         info="Manually steer the therapist's next reply (needs GENERATOR=steered).",
                     )
                     reset_btn = gr.Button("New session")
+
+                    with gr.Accordion("Demo script", open=False):
+                        gr.Examples(
+                            examples=[[m] for m in DEMO_SCRIPT],
+                            inputs=[msg_box],
+                            label="",
+                            examples_per_page=6,
+                        )
 
                     with gr.Row():
                         branch_dd = gr.Dropdown(
@@ -1447,65 +1542,25 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                         value=_render_canvas([], [], edit_mode=True)
                     )
 
-                    with gr.Accordion("Fix the graph", open=False):
-                        gr.Markdown(
-                            "Corrections here are saved server-side (unlike the "
-                            "canvas's own buttons, which only redraw). Apply them "
-                            "to the therapy session to keep talking with the "
-                            "corrected graph."
-                        )
-                        repair_node_dd = gr.Dropdown(choices=[], label="Node",
-                                                     interactive=True)
-                        repair_label_dd = gr.Dropdown(choices=_NODE_CLASSES,
-                                                      label="Class", interactive=True)
-                        repair_props_box = gr.Textbox(
-                            label="Properties (JSON)", lines=4, value="{}",
-                        )
-                        with gr.Row():
-                            save_node_btn = gr.Button("Save node")
-                            del_node_btn = gr.Button("Delete node")
-                        gr.Markdown("**Edges**")
-                        with gr.Row():
-                            edge_subj_dd = gr.Dropdown(choices=[], label="Subject",
-                                                       interactive=True)
-                            edge_pred_dd = gr.Dropdown(choices=_PREDICATES,
-                                                       label="Predicate",
-                                                       interactive=True)
-                            edge_obj_dd = gr.Dropdown(choices=[], label="Object",
-                                                      interactive=True)
-                        add_edge_btn = gr.Button("Add edge")
-                        edge_del_dd = gr.Dropdown(choices=[], label="Existing edge",
-                                                  interactive=True)
-                        del_edge_btn = gr.Button("Delete edge")
-                        apply_btn = gr.Button("Apply to therapy session",
-                                              variant="primary")
-                        repair_status = gr.Markdown("")
+                    # Edits are made in the canvas above; this only commits them.
+                    apply_btn = gr.Button("Apply to therapy session",
+                                          variant="primary")
+                    repair_status = gr.Markdown("")
+                    # Carries the edited graph from the iframe back to Python.
+                    # Hidden via CSS rather than visible=False, because an
+                    # invisible component is not rendered and the browser-side
+                    # listener would have nothing to write into.
+                    graph_sync = gr.Textbox(elem_id="graph_sync", value="",
+                                            label="", show_label=False)
 
             load_outputs = [handle_state, summary_md, query_graph_panel, query_chat, question_box]
-            repair_dds = [repair_node_dd, edge_subj_dd, edge_obj_dd, edge_del_dd]
-            repair_outputs = [summary_md, query_graph_panel] + repair_dds + [repair_status]
 
-            live_btn.click(_load_live, [session_state], load_outputs).then(
-                _repair_controls, [handle_state], repair_dds)
-            json_btn.click(_load_json, [json_file], load_outputs).then(
-                _repair_controls, [handle_state], repair_dds)
-            neo_btn.click(_load_neo4j, [neo_uri, neo_user, neo_pw], load_outputs).then(
-                _repair_controls, [handle_state], repair_dds)
+            live_btn.click(_load_live, [session_state], load_outputs)
+            json_btn.click(_load_json, [json_file], load_outputs)
+            neo_btn.click(_load_neo4j, [neo_uri, neo_user, neo_pw], load_outputs)
 
-            repair_node_dd.change(_pick_node, [handle_state, repair_node_dd],
-                                  [repair_label_dd, repair_props_box])
-            save_node_btn.click(
-                _save_node,
-                [handle_state, repair_node_dd, repair_label_dd, repair_props_box],
-                repair_outputs)
-            del_node_btn.click(_delete_node_ui, [handle_state, repair_node_dd],
-                               repair_outputs)
-            add_edge_btn.click(
-                _add_edge_ui,
-                [handle_state, edge_subj_dd, edge_pred_dd, edge_obj_dd],
-                repair_outputs)
-            del_edge_btn.click(_delete_edge_ui, [handle_state, edge_del_dd],
-                               repair_outputs)
+            graph_sync.change(_sync_canvas_edits, [handle_state, graph_sync],
+                              [summary_md, repair_status])
             apply_btn.click(_apply_to_session, [handle_state, session_state],
                             [session_bar, graph_panel, repair_status])
 
