@@ -28,6 +28,16 @@ def _text_of(label: str, props: dict) -> str:
     return ""
 
 
+def utterance_id(turn_index: int, speaker: str) -> str:
+    """Deterministic Utterance id, shared by both graph stores.
+
+    The client utterance keeps the bare `utt_<turn>` form because that is the id
+    Neo4jGraphStore already lazily creates as the EVIDENCED_BY target, so
+    recording the text MERGEs into the same node instead of forking a duplicate.
+    """
+    return f"utt_{turn_index}" if speaker == "client" else f"utt_{turn_index}_t"
+
+
 def _jaccard(a: str, b: str) -> float:
     sa = set(a.lower().split())
     sb = set(b.lower().split())
@@ -109,6 +119,32 @@ class InMemoryGraphStore:
                         node.evidence.append(turn_index)
                     return node
             return self._new_found_node_locked(label, props, turn_index)
+
+    def record_utterance(self, turn_index: int, speaker: str,
+                         text: str) -> GraphNode:
+        """Materialize a dialogue turn as an Utterance node.
+
+        Provenance, not extraction: keyed by (turn, speaker) rather than merged by
+        text similarity, and deliberately not passed through
+        apply_gating_constraints (those rules are for content classes). This is
+        what lets Part 2 resolve a node's `evidence` turn indices back into the
+        words the client actually said — without it the query engine can cite
+        "turn 7" but never quote it.
+        """
+        uid = utterance_id(turn_index, speaker)
+        with self._lock:
+            node = self._nodes.get(uid)
+            if node is None:
+                node = GraphNode(node_id=uid, label="Utterance", props={},
+                                 status="found", evidence=[],
+                                 turn_acquired=turn_index)
+                self._nodes[uid] = node
+            node.status = "found"
+            node.props = {"text": text, "speaker": speaker,
+                          "turnIndex": turn_index}
+            if turn_index not in node.evidence:
+                node.evidence.append(turn_index)
+            return node
 
     def merge_into(self, existing_id: str, props: dict, turn_index: int) -> GraphNode:
         with self._lock:

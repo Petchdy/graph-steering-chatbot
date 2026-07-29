@@ -110,3 +110,76 @@ def test_json_reader_round_trip(tmp_path: Path):
     assert {"sit_1", "at_1"}.issubset(ids)
     preds = {e.predicate for e in edges}
     assert preds == {"triggers"}
+
+
+# ── Dialogue provenance: Utterance nodes -> quotable evidence ──────────────
+
+def _graph_with_dialogue() -> InMemoryGraphStore:
+    g = _seeded_graph()
+    g.record_utterance(1, "client", "I have an exam tomorrow and I will fail.")
+    g.record_utterance(1, "therapist", "What goes through your mind then?")
+    return g
+
+
+def test_record_utterance_materializes_dialogue_nodes():
+    g = _graph_with_dialogue()
+    utts = [n for n in g.nodes() if n.label == "Utterance" and n.status == "found"]
+    assert {u.node_id for u in utts} == {"utt_1", "utt_1_t"}
+    client = next(u for u in utts if u.node_id == "utt_1")
+    assert client.props["text"].startswith("I have an exam")
+    assert client.props["speaker"] == "client"
+    assert client.props["turnIndex"] == 1
+
+
+def test_evidence_turn_indices_resolve_to_quotes():
+    nodes, edges = LiveGraphReader(_graph_with_dialogue()).load()
+    rs = execute({"intent": "list", "node_labels": ["AutomaticThought"]}, nodes, edges)
+    quotes = rs["nodes"][0]["evidence_quotes"]
+    assert [q["speaker"] for q in quotes] == ["client", "therapist"]
+    assert "exam tomorrow" in quotes[0]["text"]
+
+
+def test_utterances_excluded_from_unlabelled_list_but_available_by_label():
+    nodes, edges = LiveGraphReader(_graph_with_dialogue()).load()
+    unlabelled = execute({"intent": "list", "node_labels": []}, nodes, edges)
+    assert "Utterance" not in {n["label"] for n in unlabelled["nodes"]}
+    asked = execute({"intent": "list", "node_labels": ["Utterance"]}, nodes, edges)
+    assert {n["label"] for n in asked["nodes"]} == {"Utterance"}
+
+
+def test_summarize_carries_transcript_in_spoken_order():
+    nodes, edges = LiveGraphReader(_graph_with_dialogue()).load()
+    rs = execute({"intent": "summarize"}, nodes, edges)
+    assert [t["speaker"] for t in rs["transcript"]] == ["client", "therapist"]
+
+
+def test_graph_without_utterances_degrades_quietly():
+    """Sessions recorded before this feature must still answer, just without quotes."""
+    nodes, edges = LiveGraphReader(_seeded_graph()).load()
+    rs = execute({"intent": "list", "node_labels": ["AutomaticThought"]}, nodes, edges)
+    assert rs["nodes"] and "evidence_quotes" not in rs["nodes"][0]
+
+
+def test_qualified_property_filter_keys_are_normalized():
+    """The parse prompt lists enums as `Class.prop`; unnormalized those match nothing."""
+    from cbt_kg.query import _normalize_filters
+    assert _normalize_filters({"AutomaticThought.distortionType": "catastrophizing"}) == \
+        {"distortionType": "catastrophizing"}
+    nodes, edges = LiveGraphReader(_seeded_graph()).load()
+    rs = execute({"intent": "list", "node_labels": ["AutomaticThought"],
+                  "property_filters": _normalize_filters(
+                      {"AutomaticThought.distortionType": "catastrophizing"})},
+                 nodes, edges)
+    assert len(rs["nodes"]) == 1
+
+
+def test_dialogue_survives_json_round_trip(tmp_path):
+    nodes, _ = LiveGraphReader(_graph_with_dialogue()).load()
+    payload = {"nodes": [{"id": n.node_id, "label": n.label,
+                          "properties": n.props, "evidence": n.evidence}
+                         for n in nodes], "edges": []}
+    path = tmp_path / "export.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    rn, re_ = JsonGraphReader(str(path)).load()
+    rs = execute({"intent": "list", "node_labels": ["AutomaticThought"]}, rn, re_)
+    assert "exam tomorrow" in rs["nodes"][0]["evidence_quotes"][0]["text"]

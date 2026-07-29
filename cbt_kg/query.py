@@ -101,6 +101,7 @@ class QueryEngine:
         spec.setdefault("predicates", [])
         spec.setdefault("property_filters", {})
         spec.setdefault("free_text", question)
+        spec["property_filters"] = _normalize_filters(spec["property_filters"])
         # Strip off-ontology terms.
         spec["node_labels"] = [l for l in spec["node_labels"]
                                 if l in NODE_LABEL_LIST]
@@ -146,6 +147,24 @@ def _text_of(node: GraphNode) -> str:
     return ""
 
 
+def _normalize_filters(filters) -> dict:
+    """Strip the `Class.` qualifier off property-filter keys.
+
+    The parse prompt lists the enums in qualified form (`Problem.domain`), so the
+    model naturally emits that form — but node props are stored under the bare
+    name (`domain`). Unnormalized, the lookup misses on every node and the filter
+    silently empties the result set, which reads as "not in the graph".
+    """
+    if not isinstance(filters, dict):
+        return {}
+    out = {}
+    for k, v in filters.items():
+        key = str(k).split(".")[-1]
+        if key:
+            out[key] = v
+    return out
+
+
 def _matches_filters(node: GraphNode, filters: dict) -> bool:
     for k, v in filters.items():
         if str(node.props.get(k, "")).lower() != str(v).lower():
@@ -153,24 +172,94 @@ def _matches_filters(node: GraphNode, filters: dict) -> bool:
     return True
 
 
-def _node_view(n: GraphNode) -> dict:
-    return {
+def build_utterance_index(nodes: list[GraphNode]) -> dict[int, list[dict]]:
+    """turn index -> the dialogue spoken on that turn, from Utterance nodes.
+
+    Every source (live / JSON / Neo4j) carries utterances as ordinary nodes, so
+    this works uniformly. Sessions recorded before utterances were materialized
+    simply yield an empty index and degrade to the old citation-only behaviour.
+    """
+    idx: dict[int, list[dict]] = {}
+    for n in nodes:
+        if n.label != "Utterance":
+            continue
+        raw_turn = n.props.get("turnIndex")
+        try:
+            turn = int(raw_turn)
+        except (TypeError, ValueError):
+            continue
+        text = n.props.get("text")
+        if not isinstance(text, str) or not text:
+            continue
+        idx.setdefault(turn, []).append({
+            "turn": turn,
+            "speaker": n.props.get("speaker") or "unknown",
+            "text": text,
+        })
+    for turn in idx:
+        # client before therapist, so a quoted exchange reads in spoken order
+        idx[turn].sort(key=lambda q: q["speaker"] != "client")
+    return idx
+
+
+_TRANSCRIPT_MAX_TURNS = 60
+_TRANSCRIPT_MAX_CHARS = 400
+
+
+def _transcript_view(utt_idx: dict[int, list[dict]]) -> list[dict]:
+    """Ordered dialogue for `summarize`, so "what did we talk about?" has words.
+
+    Capped and truncated: the whole result set is json.dumps'd into the ANSWER
+    prompt, and an uncapped transcript would crowd out the graph content it is
+    supposed to be supporting.
+    """
+    out: list[dict] = []
+    for turn in sorted(utt_idx)[-_TRANSCRIPT_MAX_TURNS:]:
+        for q in utt_idx[turn]:
+            text = q["text"]
+            if len(text) > _TRANSCRIPT_MAX_CHARS:
+                text = text[:_TRANSCRIPT_MAX_CHARS] + "…"
+            out.append({**q, "text": text})
+    return out
+
+
+def _quotes_for(evidence: list, utt_idx: dict[int, list[dict]]) -> list[dict]:
+    out: list[dict] = []
+    for ev in evidence or []:
+        try:
+            turn = int(ev)
+        except (TypeError, ValueError):
+            continue
+        out.extend(utt_idx.get(turn, []))
+    return out
+
+
+def _node_view(n: GraphNode, utt_idx: dict[int, list[dict]] | None = None) -> dict:
+    view = {
         "id": n.node_id,
         "label": n.label,
         "text": _text_of(n),
         "props": n.props,
         "evidence": n.evidence,
     }
+    quotes = _quotes_for(n.evidence, utt_idx or {})
+    if quotes:
+        view["evidence_quotes"] = quotes
+    return view
 
 
-def _edge_view(e: GraphEdge) -> dict:
-    return {
+def _edge_view(e: GraphEdge, utt_idx: dict[int, list[dict]] | None = None) -> dict:
+    view = {
         "subject": e.subject_id,
         "predicate": e.predicate,
         "object": e.object_id,
         "props": e.props,
         "evidence": e.evidence,
     }
+    quotes = _quotes_for(e.evidence, utt_idx or {})
+    if quotes:
+        view["evidence_quotes"] = quotes
+    return view
 
 
 def execute(spec: dict, nodes: list[GraphNode],
@@ -181,6 +270,7 @@ def execute(spec: dict, nodes: list[GraphNode],
     filters = spec.get("property_filters") or {}
 
     by_id = {n.node_id: n for n in nodes}
+    utt_idx = build_utterance_index(nodes)
 
     if intent == "count":
         if labels:
@@ -203,23 +293,27 @@ def execute(spec: dict, nodes: list[GraphNode],
                 obj = by_id.get(e.object_id)
                 if subj and obj:
                     sample_chain.append({
-                        "subject": _node_view(subj),
+                        "subject": _node_view(subj, utt_idx),
                         "predicate": e.predicate,
-                        "object": _node_view(obj),
+                        "object": _node_view(obj, utt_idx),
                     })
         return {"intent": "summarize", "counts": by_label_counts,
-                "chain_sample": sample_chain[:8]}
+                "chain_sample": sample_chain[:8],
+                "transcript": _transcript_view(utt_idx)}
 
-    # `list` / `describe` — gather matching nodes.
+    # `list` / `describe` — gather matching nodes. Utterances are provenance, so
+    # they only appear when asked for by name; otherwise an unfiltered "list"
+    # would be swamped by every line of dialogue instead of the CBT content.
     matching = [n for n in nodes
-                if (not labels or n.label in labels)
+                if (labels or n.label != "Utterance")
+                and (not labels or n.label in labels)
                 and _matches_filters(n, filters)]
 
     if intent == "describe":
-        out_nodes = [_node_view(n) for n in matching[:5]]
+        out_nodes = [_node_view(n, utt_idx) for n in matching[:5]]
         # Neighborhood: every edge touching these.
         ids = {n.node_id for n in matching[:5]}
-        out_edges = [_edge_view(e) for e in edges
+        out_edges = [_edge_view(e, utt_idx) for e in edges
                      if e.subject_id in ids or e.object_id in ids]
         return {"intent": "describe", "nodes": out_nodes, "edges": out_edges}
 
@@ -244,13 +338,13 @@ def execute(spec: dict, nodes: list[GraphNode],
             frontier = new_frontier
         return {
             "intent": "trace",
-            "nodes": [_node_view(n) for n in walked_nodes.values()],
-            "edges": [_edge_view(e) for e in walked_edges],
+            "nodes": [_node_view(n, utt_idx) for n in walked_nodes.values()],
+            "edges": [_edge_view(e, utt_idx) for e in walked_edges],
         }
 
     # Default: list.
     return {"intent": "list",
-            "nodes": [_node_view(n) for n in matching]}
+            "nodes": [_node_view(n, utt_idx) for n in matching]}
 
 
 def _fallback_render(rs: dict) -> str:
@@ -282,4 +376,6 @@ def _fallback_render(rs: dict) -> str:
     lines = []
     for n in nodes[:8]:
         lines.append(f"- {n['label']} ({n['id']}): {n['text']}")
+        for q in (n.get("evidence_quotes") or [])[:2]:
+            lines.append(f"    turn {q['turn']} {q['speaker']}: \"{q['text'][:120]}\"")
     return "\n".join(lines) if lines else "(empty)"

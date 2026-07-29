@@ -259,6 +259,10 @@ const PREDICATES = __PREDICATES__;
 
 let nodes = __NODES__;
 let edges = __EDGES__;
+// Nodes kept out of the drawing but still written by saveJSON — Utterance
+// provenance, which is too noisy to render yet is what lets a re-loaded export
+// quote the dialogue in the Query tab.
+const hiddenNodes = __HIDDEN_NODES__;
 
 // ── Layout constants ──────────────────────────────────────────────────────
 const LAYERS = {
@@ -793,7 +797,7 @@ function saveJSON() {
   // V4_flat Stage 5 export shape (matches JsonGraphReader in graph_reader.py) so a saved
   // file can be re-loaded via "Load JSON" without corruption. Only 'found' items are
   // exported — 'missing' placeholders aren't real extracted facts.
-  const outNodes = nodes
+  const outNodes = nodes.concat(hiddenNodes)
     .filter(function(n) { return n.status === 'found'; })
     .map(function(n) { return {id: n.id, label: n.label, properties: n.props || {},
                                 evidence: n.evidence || []}; });
@@ -838,10 +842,15 @@ def _render_canvas(
     canvas_edges: list[dict],
     edit_mode: bool = False,
     height: int = 610,
+    hidden_nodes: list[dict] | None = None,
 ) -> str:
-    """Render the canvas graph as an iframe srcdoc string."""
+    """Render the canvas graph as an iframe srcdoc string.
+
+    `hidden_nodes` are excluded from the drawing but still written by saveJSON.
+    """
     nodes_json = json.dumps(canvas_nodes)
     edges_json = json.dumps(canvas_edges)
+    hidden_json = json.dumps(hidden_nodes or [])
     edit_str = "true" if edit_mode else "false"
     color_json = json.dumps(_COLOR)
     badge_bg_json = json.dumps(_BADGE_BG)
@@ -853,6 +862,7 @@ def _render_canvas(
         _CANVAS_TEMPLATE
         .replace("__NODES__", nodes_json)
         .replace("__EDGES__", edges_json)
+        .replace("__HIDDEN_NODES__", hidden_json)
         .replace("__EDIT_MODE__", edit_str)
         .replace("__COLOR__", color_json)
         .replace("__BADGE_BG__", badge_bg_json)
@@ -971,7 +981,13 @@ def _summary_text(nodes: list[GraphNode], edges: list[GraphEdge], label: str) ->
 
 def _make_query_graph_html(gnodes: list[GraphNode], gedges: list[GraphEdge]) -> str:
     cn, ce = _build_canvas_data(gnodes, gedges)
-    return _render_canvas(cn, ce, edit_mode=True)
+    # Utterances are filtered out of the drawing by _build_canvas_data, but must
+    # survive a save→re-load round-trip or the re-loaded graph can no longer
+    # quote the dialogue.
+    hidden, _ = _build_canvas_data(
+        [n for n in gnodes if n.label == "Utterance"], [], skip_utterance=False
+    )
+    return _render_canvas(cn, ce, edit_mode=True, hidden_nodes=hidden)
 
 
 def _load_live(therapy_session: Session):

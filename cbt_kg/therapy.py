@@ -90,6 +90,11 @@ async def async_turn(session: Session, user_message: str) -> dict:
 
     session.history.append((user_message, ""))
     session.transcript.append((turn_index, "client", user_message))
+    # Record the turn as an Utterance node before extraction runs, so the turn
+    # indices extraction writes into node.evidence already have something to
+    # resolve against. Part 2 needs this to quote dialogue rather than just cite
+    # turn numbers; Session.transcript is process-local and never reaches it.
+    session.graph.record_utterance(turn_index, "client", user_message)
 
     extraction_task = asyncio.create_task(
         _run_extraction(session, user_message, window, turn_index)
@@ -131,6 +136,7 @@ async def async_turn(session: Session, user_message: str) -> dict:
         proposed = next_phase
     session.history[-1] = (user_message, reply)
     session.transcript.append((turn_index, "therapist", reply))
+    session.graph.record_utterance(turn_index, "therapist", reply)
 
     extraction_mode = "sync" if extraction_task.done() else "async"
     try:

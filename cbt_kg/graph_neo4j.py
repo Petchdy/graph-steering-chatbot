@@ -21,7 +21,7 @@ import threading
 from typing import Iterable
 
 from .interfaces import GraphEdge, GraphNode, Schema
-from .graph_memory import cytoscape_render
+from .graph_memory import cytoscape_render, utterance_id
 from .ontology import (CLASS_HIERARCHY, CONTENT_LABELS, GROUP_KEY_PROP,
                        ID_PREFIX, NODE_CLASSES, REL_TYPE, TEXT_PROP)
 
@@ -299,7 +299,36 @@ class Neo4jGraphStore:
                 out[k] = str(v)
         return out
 
+    def record_utterance(self, turn_index: int, speaker: str,
+                         text: str) -> GraphNode:
+        """Store the dialogue text on the Utterance node (see graph_memory for why).
+
+        For speaker='client' the id is the same `utt_<turn>` that
+        _ensure_utterance_locked creates as the EVIDENCED_BY target, so this MERGE
+        enriches that node in place rather than creating a parallel one.
+        """
+        uid = utterance_id(turn_index, speaker)
+        with self._lock:
+            with self._driver.session() as s:
+                s.run(
+                    "MERGE (u:Utterance:ABox {id:$id}) "
+                    "SET u.turnIndex=$ti, u.speaker=$sp, u.text=$tx",
+                    id=uid, ti=turn_index, sp=speaker, tx=text,
+                )
+                s.run(
+                    "MATCH (u:Utterance {id:$id}),(se:Session {id:'session_1'}) "
+                    "MERGE (u)-[:IN_SESSION]->(se)",
+                    id=uid,
+                )
+        return GraphNode(
+            node_id=uid, label="Utterance",
+            props={"text": text, "speaker": speaker, "turnIndex": turn_index},
+            status="found", evidence=[turn_index], turn_acquired=turn_index,
+        )
+
     def _ensure_utterance_locked(self, s, turn_index: int) -> None:
+        # Only the id/turnIndex scaffold — speaker/text arrive via record_utterance,
+        # which MERGEs onto this same id.
         s.run(
             "MERGE (u:Utterance:ABox {id:$id}) "
             "SET u.turnIndex=$ti",

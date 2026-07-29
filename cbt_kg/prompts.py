@@ -301,7 +301,22 @@ INTENTS:
   trace      — walk a chain along given predicates (e.g. Situation→AT→Reaction)
   count      — return counts by label
   describe   — describe one node and its immediate neighbours
-  summarize  — high-level overview of the whole graph
+  summarize  — high-level overview of the whole graph, plus the dialogue
+
+DIALOGUE QUESTIONS:
+Utterance nodes hold what was actually said (props: text, speaker, turnIndex).
+- Asking what someone *said*, or for their exact/own words, or what was
+  discussed at a point in the session -> intent "list", node_labels ["Utterance"].
+- Asking broadly what the whole session or conversation was about -> intent
+  "summarize" (it returns the transcript).
+- Do NOT put a property_filter on Utterance text; retrieval is by label, and the
+  answerer picks the relevant lines out of what you return.
+
+PROPERTY FILTERS:
+Keys must be the BARE property name as stored on the node — "domain", not
+"Problem.domain" (the enums are listed qualified above only to show which class
+each belongs to). Only add a filter the question actually asks for; a filter
+that no node matches returns nothing at all.
 
 USER QUESTION:
 {question}
@@ -322,6 +337,14 @@ RULES:
 - Answer ONLY from the result set. Do not invent nodes, edges, properties, or
   conclusions that are not present.
 - Cite node ids and evidence turn indices in parentheses, e.g. (at_2, turns 7,9).
+- Nodes and edges may carry "evidence_quotes" — what was actually said on those
+  turns — and a "transcript" key may carry the dialogue in order. Quote this
+  wording verbatim when it supports the answer, attributing the speaker, e.g.
+  the client said "I froze in the meeting" (turn 3). Quote only what appears
+  there; never paraphrase a quote into something that was not said.
+- If the question is about the conversation itself (what was said, discussed,
+  or asked) answer from those quotes. If the result set has no quotes, say the
+  dialogue was not recorded for this graph rather than guessing at it.
 - If the result set is empty, say "this isn't in the session's graph."
 - Be concise. Therapist-facing tone.
 - Do not name CBT techniques in jargon — but it is fine to use V4_flat terms

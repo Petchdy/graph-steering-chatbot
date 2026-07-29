@@ -182,6 +182,28 @@ This matches `cbt_stage5_persist_v4.write_neo4j` byte-for-byte.
 
 ### Part 2 — universal query
 
+**Dialogue provenance.** `GraphStore.record_utterance(turn_index, speaker, text)`
+writes each turn as an `Utterance` node (`text`/`speaker`/`turnIndex`), called from
+`therapy.async_turn` for both speakers. Ids are deterministic via
+`graph_memory.utterance_id`: the client's is the bare `utt_<turn>` that
+`Neo4jGraphStore._ensure_utterance_locked` already creates as the `EVIDENCED_BY`
+target (so recording MERGEs into it rather than forking a duplicate); the
+therapist's is `utt_<turn>_t`.
+
+This is what makes dialogue queryable. `node.evidence` / `edge.evidence` are bare
+turn *indices*; `query.build_utterance_index` turns them back into words, and
+`_node_view` / `_edge_view` attach an `evidence_quotes` list. Without utterances
+in the graph the query engine can cite "turn 7" but never quote it —
+`Session.transcript` is process-local and never reaches Part 2. Graphs recorded
+before this existed yield an empty index and degrade to citation-only.
+
+Two related traps: `execute` hides `Utterance` from *unlabelled* `list`/`describe`
+(otherwise dialogue swamps the CBT content — ask for it by label, which
+`QUERY_PARSE_PROMPT` now instructs), and `_normalize_filters` strips the `Class.`
+qualifier off property-filter keys, because the parse prompt lists enums as
+`Problem.domain` while props are stored bare — unnormalized, one hallucinated
+filter silently empties the result set and reads as "not in the graph".
+
 `GraphReader` Protocol has one method: `load() → (nodes, edges)`. Three
 implementations all emit the same canonical shape — `LiveGraphReader`
 (wraps a Part 1 `GraphStore`), `JsonGraphReader` (Stage 5 export),
@@ -214,6 +236,10 @@ renders its own `<canvas>` + inspector panel and never calls them.
   V4_flat Stage 5 shape, `found` items only) → re-upload via **Load JSON**.
 - `_NODE_CLASSES` / `_PREDICATES` / `NODE_COLORS` are hand-maintained lists,
   not derived from `ontology.py`; extending the ontology means editing them too.
+- `_render_canvas(hidden_nodes=…)` (`__HIDDEN_NODES__`) carries nodes that are
+  excluded from the drawing but still written by `saveJSON` — currently the
+  `Utterance` nodes, so a saved export can still quote dialogue when re-loaded.
+  Anything filtered out of the canvas but needed on disk belongs here.
 
 ### FastAPI routes (`api.py`)
 
