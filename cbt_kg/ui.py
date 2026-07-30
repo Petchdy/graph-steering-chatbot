@@ -131,6 +131,12 @@ INTRO = (
 # stay in the graph itself, and remain editable in Tab 2's repair dropdowns.
 SCAFFOLD_LABELS = ("Client", "Session")
 
+# Tab 1 is sized to land inside a single ~700px viewport: the left column's
+# stacked controls and the right column's canvas finish at about the same height.
+# Tab 2 keeps the taller canvas — it is a working surface, not a dashboard.
+THERAPY_CHAT_H = 300
+THERAPY_CANVAS_H = 520
+
 # Hidden from the therapy panel's canvas *and* its legend. Part 2 still draws
 # and lists all three, so its legend keeps the original full set.
 THERAPY_HIDDEN_LABELS = {"Client", "Session", "Utterance"}
@@ -204,7 +210,7 @@ _CANVAS_TEMPLATE = '''<!DOCTYPE html>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: #f6f8fb; }
-.shell { display: flex; flex-direction: column; height: 610px; background: #ffffff; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 8px; }
+.shell { display: flex; flex-direction: column; height: __SHELL_H__px; background: #ffffff; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 8px; }
 .graph-header { display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #fbfdff; flex-shrink: 0; }
 .graph-title { font-size: 12px; font-weight: 650; color: #273142; letter-spacing: 0; white-space: nowrap; }
@@ -967,6 +973,7 @@ def _render_canvas(
         .replace("__NODES__", nodes_json)
         .replace("__EDGES__", edges_json)
         .replace("__HIDDEN_NODES__", hidden_json)
+        .replace("__SHELL_H__", str(height))
         .replace("__LEGEND__", _legend_html(hide_legend_labels,
                                             row_breaks=not hide_legend_labels))
         .replace("__EDIT_MODE__", edit_str)
@@ -1051,7 +1058,8 @@ def _bot_respond(message: str, history: list, session: Session, strategy: str = 
     nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges(),
                                       skip_scaffold=True)
     graph_html = _render_canvas(nodes, edges, edit_mode=False,
-                           hide_legend_labels=THERAPY_HIDDEN_LABELS)
+                           hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                           height=THERAPY_CANVAS_H)
     return history, session, bar_html, graph_html
 
 
@@ -1062,7 +1070,8 @@ def _reset_therapy():
     nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges(),
                                       skip_scaffold=True)
     graph_html = _render_canvas(nodes, edges, edit_mode=False,
-                           hide_legend_labels=THERAPY_HIDDEN_LABELS)
+                           hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                           height=THERAPY_CANVAS_H)
     return history, session, bar_html, graph_html
 
 
@@ -1209,7 +1218,8 @@ def _therapy_view(session: Session, strategy: str, phase: str, technique: str,
     nodes, edges = _build_canvas_data(session.graph.nodes(), session.graph.edges(),
                                       skip_scaffold=True)
     return bar, _render_canvas(nodes, edges, edit_mode=False,
-                           hide_legend_labels=THERAPY_HIDDEN_LABELS)
+                           hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                           height=THERAPY_CANVAS_H)
 
 
 def _message_index_to_turn(chat_history: list, index) -> int:
@@ -1245,7 +1255,8 @@ def _do_rewrite(session: Session, turn_index, new_message: str,
         bar, graph_html = (_therapy_view(session, strategy,
                                          snap.get("session_phase", "Rapport"),
                                          snap.get("active_technique", "Rapport Building"))
-                           if session else ("", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS)))
+                           if session else ("", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                                       height=THERAPY_CANVAS_H)))
         return (_history_to_chat(session) if session else [], session, bar,
                 graph_html, branch_dd,
                 "Edit a message of yours to try it a different way.")
@@ -1273,12 +1284,14 @@ def _do_switch_branch(session: Session, branch_id, strategy: str = "none"):
     if session is None or not branch_id:
         branch_dd = _branch_controls(session)
         return ([] if session is None else _history_to_chat(session), session,
-                "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS), branch_dd, "No version selected.")
+                "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                                       height=THERAPY_CANVAS_H), branch_dd, "No version selected.")
     try:
         switch_branch(session, branch_id)
     except ValueError as exc:
         branch_dd = _branch_controls(session)
-        return (_history_to_chat(session), session, "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS),
+        return (_history_to_chat(session), session, "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                                       height=THERAPY_CANVAS_H),
                 branch_dd, f"{exc}")
     snap = session.graph.snapshot()
     bar, graph_html = _therapy_view(
@@ -1348,9 +1361,11 @@ def _apply_to_session(handle, session: Session):
     on the very next turn — that is the whole point of the round-trip.
     """
     if session is None:
-        return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS), "No therapy session yet — start one in Tab 1."
+        return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                                       height=THERAPY_CANVAS_H), "No therapy session yet — start one in Tab 1."
     if not handle or handle not in _loaded_graphs:
-        return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS), "Load a graph first."
+        return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                                       height=THERAPY_CANVAS_H), "Load a graph first."
     gnodes, gedges, _ = _loaded_graphs[handle]
     session.graph.replace_all(gnodes, gedges)
     snap = session.graph.snapshot()
@@ -1395,39 +1410,7 @@ body, .gradio-container {
 }
 .gradio-container {
   max-width: none !important;
-  padding: 18px 22px 24px !important;
-}
-.app-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-  margin: 0 0 14px;
-  padding: 0 2px;
-}
-.app-title {
-  margin: 0;
-  font-size: 24px;
-  line-height: 1.1;
-  font-weight: 750;
-  color: var(--text);
-  letter-spacing: 0;
-}
-.app-subtitle {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-.app-badge {
-  align-self: center;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  background: var(--panel);
-  font-size: 12px;
-  font-weight: 650;
-  white-space: nowrap;
+  padding: 10px 22px 16px !important;
 }
 .tabs {
   background: transparent !important;
@@ -1531,11 +1514,43 @@ button.primary, .primary > button {
   background: var(--blue) !important;
   border-color: var(--blue) !important;
 }
-button.secondary {
-  border-color: var(--border-strong) !important;
+/* Gradio's base button has no border-width, so setting border-color alone left
+   the secondary buttons outline-less. Declare the full shorthand. */
+button.secondary,
+.secondary > button,
+button[class*="secondary"] {
+  border: 1px solid var(--border-strong) !important;
   background: #fff !important;
   color: var(--text) !important;
+  box-shadow: 0 1px 1px rgba(31,42,55,0.04) !important;
 }
+button.secondary:hover,
+.secondary > button:hover,
+button[class*="secondary"]:hover {
+  border-color: var(--blue) !important;
+  background: var(--blue-soft) !important;
+  color: #174a7c !important;
+}
+
+/* Composer: the textbox sits in a Gradio form wrapper whose padding made Send
+   sit a few px off and stretch with the row. Pin both to one height and stop
+   the button growing. */
+.composer { align-items: center !important; gap: 8px !important; }
+.composer textarea, .composer input[type="text"] {
+  min-height: 42px !important;
+  padding-top: 11px !important;
+  padding-bottom: 11px !important;
+}
+.composer button {
+  min-height: 42px !important;
+  height: 42px !important;
+  flex: 0 0 auto !important;
+  min-width: 104px !important;
+  max-width: 132px !important;
+  font-weight: 650 !important;
+}
+/* Paired action buttons share the row evenly. */
+.action-pair button { min-height: 38px !important; }
 .section-title {
   margin: 2px 0 8px;
   color: var(--text);
@@ -1559,7 +1574,6 @@ iframe {
 }
 @media (max-width: 900px) {
   .gradio-container { padding: 14px !important; }
-  .app-header { align-items: flex-start; flex-direction: column; gap: 8px; }
   .workspace-row { gap: 12px !important; }
   .control-panel { padding: 12px !important; }
 }
@@ -1590,15 +1604,6 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
     session_state = gr.State(None)
     pending_msg = gr.State("")
 
-    gr.HTML(
-        '<div class="app-header">'
-        '<div><h1 class="app-title">CBT Graph Steering</h1>'
-        '<p class="app-subtitle">Live therapy dialogue with an inspectable V4 knowledge graph.</p></div>'
-        '<div class="app-badge">V4_flat ontology</div>'
-        '</div>',
-        padding=False,
-    )
-
     with gr.Tabs(elem_classes=["main-tabs"]):
         # ── Tab 1: Therapy ───────────────────────────────────────────
         with gr.Tab("Therapy (Part 1)"):
@@ -1607,7 +1612,7 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                 with gr.Column(scale=2, elem_classes=["control-panel"]):
                     session_bar = gr.HTML(value="")
                     chatbot = gr.Chatbot(
-                        height=420,
+                        height=THERAPY_CHAT_H,
                         show_label=False,
                         # Gradio's default toolbar is ["share", "copy_all"], and
                         # "share" opens a Hugging Face Spaces Discussions panel —
@@ -1621,20 +1626,33 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                         # option to disable it; hidden via CSS on this id below.
                         elem_id="therapy_chat",
                     )
-                    with gr.Row():
+                    with gr.Row(equal_height=True, elem_classes=["composer"]):
                         msg_box = gr.Textbox(
                             placeholder="Share what's on your mind…",
                             show_label=False,
                             scale=5,
                         )
                         send_btn = gr.Button("Send", variant="primary", scale=1)
-                    strategy_dd = gr.Dropdown(
-                        choices=["none", "Question", "Affirmation and Reassurance",
-                                 "Self-disclosure", "Reflection of feelings", "Info+Suggest"],
-                        value="none", label="Steering strategy",
-                        info="Manually steer the therapist's next reply (needs GENERATOR=steered).",
-                    )
-                    reset_btn = gr.Button("New session")
+                    # Two equal columns, each button directly under the control it
+                    # acts on: steering / New session · versions / Switch. The
+                    # previous full-width dropdown-then-full-width-button stack was
+                    # both lopsided and three rows taller. `info=` lines are dropped
+                    # — each one cost a row, and the hints now live in the labels.
+                    with gr.Row(equal_height=True):
+                        strategy_dd = gr.Dropdown(
+                            choices=["none", "Question", "Affirmation and Reassurance",
+                                     "Self-disclosure", "Reflection of feelings",
+                                     "Info+Suggest"],
+                            value="none", label="Steering strategy", scale=1,
+                        )
+                        branch_dd = gr.Dropdown(
+                            choices=[], label="Versions (edit a message to add one)",
+                            interactive=True, scale=1,
+                        )
+                    with gr.Row(equal_height=True, elem_classes=["action-pair"]):
+                        reset_btn = gr.Button("New session", scale=1)
+                        switch_btn = gr.Button("Switch version", scale=1)
+                    branch_status = gr.Markdown("")
 
                     with gr.Accordion("Demo script", open=False):
                         gr.Examples(
@@ -1643,16 +1661,6 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                             label="",
                             examples_per_page=6,
                         )
-
-                    with gr.Row():
-                        branch_dd = gr.Dropdown(
-                            choices=[], label="Versions of this turn",
-                            interactive=True, scale=4,
-                            info="Edit any message of yours (pencil icon) to make "
-                                 "another version. ● = the one you're in.",
-                        )
-                        switch_btn = gr.Button("Switch", scale=1)
-                    branch_status = gr.Markdown("")
 
                 # Right column: live graph
                 with gr.Column(scale=3, elem_classes=["graph-column"]):
