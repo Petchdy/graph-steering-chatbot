@@ -28,21 +28,21 @@ from .therapy import (Session, turn, edit_turn, editable_turns, list_branches,
 
 NODE_COLORS: dict[str, tuple[str, str, str]] = {
     # label: (fill, stroke, text)
-    "Client":              ("#E5E7EB", "#D1D5DB", "#1F2937"),
-    "Session":             ("#E5E7EB", "#D1D5DB", "#1F2937"),
-    "Problem":             ("#F87171", "#EF4444", "#FFFFFF"),
-    "Goal":                ("#34D399", "#10B981", "#1F2937"),
-    "Intervention":        ("#A78BFA", "#8B5CF6", "#FFFFFF"),
-    "Homework":            ("#FBBF24", "#F59E0B", "#1F2937"),
-    "CoreBelief":          ("#9D174D", "#831843", "#FFFFFF"),
-    "IntermediateBelief":  ("#BE185D", "#9D174D", "#FFFFFF"),
-    "Situation":           ("#FDE047", "#FACC15", "#1F2937"),
-    "AutomaticThought":    ("#6EE7B7", "#34D399", "#1F2937"),
-    "Reaction":            ("#FCA5A5", "#F87171", "#1F2937"),
-    "AdaptiveResponse":    ("#D1FAE5", "#6EE7B7", "#065F46"),
-    "Utterance":           ("#D1D5DB", "#9CA3AF", "#1F2937"),
+    "Client":              ("#EEF2F7", "#CBD5E1", "#273142"),
+    "Session":             ("#EEF2F7", "#CBD5E1", "#273142"),
+    "Problem":             ("#E8F1FD", "#3B82D6", "#174A7C"),
+    "Goal":                ("#E5F6EE", "#27A36B", "#12613F"),
+    "Intervention":        ("#FFF2D9", "#D98518", "#744407"),
+    "Homework":            ("#FFF7CC", "#C99700", "#604B00"),
+    "CoreBelief":          ("#F1EAFE", "#7C5CC4", "#3F2E75"),
+    "IntermediateBelief":  ("#F8E8F1", "#B54F83", "#6D2348"),
+    "Situation":           ("#EDF4FF", "#6A8FCC", "#243F6B"),
+    "AutomaticThought":    ("#E8F4F2", "#34998B", "#175C55"),
+    "Reaction":            ("#FDEBE7", "#DE6B52", "#7C2E20"),
+    "AdaptiveResponse":    ("#E4F7F0", "#24A47A", "#0F6046"),
+    "Utterance":           ("#F1F5F9", "#94A3B8", "#334155"),
 }
-_MISSING_COLORS = ("#F5F5F5", "#AAAAAA", "#AAAAAA")
+_MISSING_COLORS = ("#F8FAFC", "#CBD5E1", "#94A3B8")
 
 _COLOR = {k: v[1] for k, v in NODE_COLORS.items()}    # stroke
 _BADGE_BG = {k: v[0] for k, v in NODE_COLORS.items()}  # fill
@@ -203,74 +203,74 @@ _CANVAS_TEMPLATE = '''<!DOCTYPE html>
 <meta charset="utf-8">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: system-ui, sans-serif; font-size: 14px; background: #fafafa; }
-.shell { display: flex; flex-direction: column; height: 610px; background: #fafafa; overflow: hidden; }
+body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: #f6f8fb; }
+.shell { display: flex; flex-direction: column; height: 610px; background: #ffffff; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 8px; }
 .graph-header { display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 14px; border-bottom: 0.5px solid #e5e7eb; background: #fff; flex-shrink: 0; }
-.graph-title { font-size: 12px; font-weight: 500; color: #555; }
+  gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #fbfdff; flex-shrink: 0; }
+.graph-title { font-size: 12px; font-weight: 650; color: #273142; letter-spacing: 0; white-space: nowrap; }
 .graph-actions { display: flex; gap: 6px; align-items: center; }
-.btn-sm { font-size: 11px; padding: 4px 10px; border-radius: 6px;
-  border: 0.5px solid #d1d5db; background: transparent; cursor: pointer; color: #555; }
-.btn-sm:hover { background: #f3f4f6; }
-.btn-sm.primary { background: #D85A30; color: #fff; border-color: #D85A30; }
-.btn-sm.primary:hover { background: #993C1D; }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #1D9E75;
+.btn-sm { font-size: 11px; font-weight: 600; padding: 5px 9px; border-radius: 6px;
+  border: 1px solid #d5deea; background: #fff; cursor: pointer; color: #44546a; box-shadow: 0 1px 1px rgba(15,23,42,0.03); }
+.btn-sm:hover { background: #eef4fb; border-color: #b8c7d9; color: #1f2a37; }
+.btn-sm.primary { background: #2f7dd1; color: #fff; border-color: #2f7dd1; }
+.btn-sm.primary:hover { background: #2465aa; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: #24A47A;
   display: inline-block; margin-right: 5px; vertical-align: middle; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
-.graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: #fff; }
+.graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: radial-gradient(circle at 18px 18px, rgba(148,163,184,0.18) 1px, transparent 1px) 0 0/28px 28px, #ffffff; }
 canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
-.legend { padding: 7px 14px; border-top: 0.5px solid #e5e7eb;
+.legend { padding: 8px 14px; border-top: 1px solid #e2e8f0;
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-  flex-shrink: 0; background: #fff; margin-top: auto; }
-.leg { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #777; }
+  flex-shrink: 0; background: rgba(255,255,255,0.96); margin-top: auto; }
+.leg { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #64748b; white-space: nowrap; }
 .ld { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .detail-panel { width: 240px; flex-shrink: 0; display: flex; flex-direction: column;
-  border-left: 0.5px solid #e5e7eb; background: #fff; overflow-y: auto; }
-.dp-header { padding: 10px 14px 8px; border-bottom: 0.5px solid #e5e7eb;
+  border-left: 1px solid #e2e8f0; background: #fbfdff; overflow-y: auto; }
+.dp-header { padding: 11px 14px 9px; border-bottom: 1px solid #e2e8f0;
   display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-.dp-title { font-size: 12px; font-weight: 500; color: #222; }
-.dp-close { font-size: 16px; color: #aaa; cursor: pointer; border: none; background: none; padding: 0; }
-.dp-close:hover { color: #222; }
-.dp-empty { padding: 24px 14px; text-align: center; color: #aaa; font-size: 12px; line-height: 1.6; }
+.dp-title { font-size: 12px; font-weight: 650; color: #273142; }
+.dp-close { font-size: 15px; color: #94a3b8; cursor: pointer; border: none; background: none; padding: 0; }
+.dp-close:hover { color: #273142; }
+.dp-empty { padding: 28px 14px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; }
 .dp-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
-.dp-label-badge { display: inline-block; font-size: 10px; font-weight: 500;
-  padding: 2px 8px; border-radius: 20px; margin-bottom: 4px; }
+.dp-label-badge { display: inline-block; font-size: 10px; font-weight: 650;
+  padding: 3px 8px; border-radius: 999px; margin-bottom: 4px; }
 .dp-field { display: flex; flex-direction: column; gap: 3px; }
-.dp-field label { font-size: 10px; color: #999; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.05em; }
+.dp-field label { font-size: 10px; color: #64748b; font-weight: 650;
+  text-transform: uppercase; letter-spacing: 0.04em; }
 .dp-field input, .dp-field select, .dp-field textarea {
-  font-size: 12px; padding: 5px 8px; border-radius: 6px;
-  border: 0.5px solid #d1d5db; background: #f9fafb; color: #222;
+  font-size: 12px; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid #d5deea; background: #fff; color: #273142;
   width: 100%; font-family: inherit; resize: none; }
 .dp-field textarea { min-height: 52px; }
 .dp-field input:focus, .dp-field select:focus, .dp-field textarea:focus
-  { outline: none; border-color: #D85A30; }
-.dp-actions { padding: 10px 14px; border-top: 0.5px solid #e5e7eb;
+  { outline: none; border-color: #2f7dd1; box-shadow: 0 0 0 3px rgba(47,125,209,0.12); }
+.dp-actions { padding: 10px 14px; border-top: 1px solid #e2e8f0;
   display: flex; gap: 6px; flex-shrink: 0; }
 .dp-actions button { flex: 1; font-size: 11px; padding: 6px; border-radius: 6px;
-  border: 0.5px solid #d1d5db; background: transparent; cursor: pointer; color: #555; }
-.dp-actions button.save { background: #D85A30; color: #fff; border-color: #D85A30; }
-.dp-actions button.del { color: #E24B4A; border-color: #E24B4A; }
+  border: 1px solid #d5deea; background: #fff; cursor: pointer; color: #44546a; }
+.dp-actions button.save { background: #2f7dd1; color: #fff; border-color: #2f7dd1; }
+.dp-actions button.del { color: #b4232a; border-color: #f3b9be; }
 .dp-actions button:hover { filter: brightness(0.92); }
 .create-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.3); display: flex; align-items: center;
+  background: rgba(15,23,42,0.35); display: flex; align-items: center;
   justify-content: center; z-index: 100; }
-.modal-box { background: #fff; border-radius: 10px; border: 0.5px solid #d1d5db;
-  padding: 16px; width: 220px; display: flex; flex-direction: column; gap: 10px; }
-.modal-title { font-size: 13px; font-weight: 500; color: #222; }
+.modal-box { background: #fff; border-radius: 8px; border: 1px solid #d5deea;
+  padding: 16px; width: 240px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 18px 45px rgba(15,23,42,0.18); }
+.modal-title { font-size: 13px; font-weight: 650; color: #273142; }
 .modal-field { display: flex; flex-direction: column; gap: 4px; }
-.modal-field label { font-size: 10px; color: #999; font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.05em; }
+.modal-field label { font-size: 10px; color: #64748b; font-weight: 650;
+  text-transform: uppercase; letter-spacing: 0.04em; }
 .modal-field select, .modal-field input, .modal-field textarea {
-  font-size: 12px; padding: 5px 8px; border-radius: 6px;
-  border: 0.5px solid #d1d5db; background: #f9fafb; color: #222;
+  font-size: 12px; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid #d5deea; background: #fff; color: #273142;
   width: 100%; font-family: inherit; }
 .modal-field textarea { min-height: 48px; resize: none; }
 .modal-actions { display: flex; gap: 6px; }
 .modal-actions button { flex: 1; font-size: 11px; padding: 6px; border-radius: 6px;
-  border: 0.5px solid #d1d5db; background: transparent; cursor: pointer; color: #555; }
-.modal-actions button.confirm { background: #D85A30; color: #fff; border-color: #D85A30; }
+  border: 1px solid #d5deea; background: #fff; cursor: pointer; color: #44546a; }
+.modal-actions button.confirm { background: #2f7dd1; color: #fff; border-color: #2f7dd1; }
 </style>
 </head>
 <body>
@@ -284,7 +284,7 @@ canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
       <canvas id="gc"></canvas>
       <div class="legend">
 __LEGEND__
-        <div class="leg"><div style="width:16px;height:1.5px;background:#1D9E75;"></div>Found</div>
+        <div class="leg"><div style="width:16px;height:1.5px;background:#24A47A;"></div>Found</div>
         <div class="leg" id="legPlaceholderEdge"><div style="width:16px;height:1.5px;background:repeating-linear-gradient(90deg,#bbb 0,#bbb 3px,transparent 3px,transparent 6px);"></div>Placeholder</div>
       </div>
     </div>
@@ -591,7 +591,7 @@ function draw() {
     if (!a || !b) continue;
     const sel = selected && selected.type === 'edge' && selected.id === e.id;
     const isFound = e.status === 'found';
-    const col = sel ? '#D85A30' : (isFound ? '#1D9E75' : '#bbb');
+    const col = sel ? '#2f7dd1' : (isFound ? '#24A47A' : '#94a3b8');
     ctx.save();
     ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.2 : 1.4;
     if (!isFound) ctx.setLineDash([5, 3]);
@@ -612,7 +612,7 @@ function draw() {
     ctx.closePath(); ctx.fill();
     const mx=(sx+ex)/2+uy*CURVE*0.5, my=(sy+ey)/2-ux*CURVE*0.5;
     ctx.font='9px system-ui,sans-serif';
-    ctx.fillStyle = sel ? '#D85A30' : (isFound ? '#0F6E56' : '#aaa');
+    ctx.fillStyle = sel ? '#2f7dd1' : (isFound ? '#12613F' : '#94a3b8');
     ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText(e.predicate, mx, my-7);
     ctx.restore();
@@ -630,8 +630,8 @@ function draw() {
     // §UI-1.1 §2.1: use BADGE_COLOR for both text lines, not stroke colour
     const nodeTextCol = isMissing ? '#9aa0a6' : (BADGE_COLOR[n.label] || '#1F2937');
 
-    if (sel || efrom) { ctx.shadowColor = efrom ? '#378ADD' : '#D85A30'; ctx.shadowBlur = 10; }
-    ctx.fillStyle = bgCol; ctx.strokeStyle = sel ? '#D85A30' : col; ctx.lineWidth = sel ? 2.2 : 1.5;
+    if (sel || efrom) { ctx.shadowColor = efrom ? '#2f7dd1' : '#24A47A'; ctx.shadowBlur = 10; }
+    ctx.fillStyle = bgCol; ctx.strokeStyle = sel ? '#2f7dd1' : col; ctx.lineWidth = sel ? 2.2 : 1.5;
     if (isMissing) ctx.setLineDash([4, 3]);
     if (isRect) { roundRect(ctx, n.x-RADIUS_RECT_W, n.y-RADIUS_RECT_H, RADIUS_RECT_W*2, RADIUS_RECT_H*2, 6); }
     else { ctx.beginPath(); ctx.arc(n.x, n.y, RADIUS_CIRCLE, 0, Math.PI*2); }
@@ -719,8 +719,8 @@ function renderDP(body, actions) {
 
 function showNodePanel(n) {
   if (!n) return;
-  const bb = BADGE_BG[n.label]||'#eee', bc = BADGE_COLOR[n.label]||'#333';
-  const sBg = n.status==='found'?'#E1F5EE':'#f0f0f0', sFg = n.status==='found'?'#0F6E56':'#888';
+  const bb = BADGE_BG[n.label]||'#eef2f7', bc = BADGE_COLOR[n.label]||'#273142';
+  const sBg = n.status==='found'?'#E4F7F0':'#F1F5F9', sFg = n.status==='found'?'#0F6046':'#64748b';
   const badge = '<span class="dp-label-badge" style="background:'+bb+';color:'+bc+';">'+n.label+'</span>';
   const stag  = '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:'+sBg+';color:'+sFg+';">'+n.status+'</span>';
   let fields = '<div class="dp-field">'+badge+' '+stag+'</div>';
@@ -747,7 +747,7 @@ function showNodePanel(n) {
 
 function showEdgePanel(e) {
   if (!e) return;
-  const sBg = e.status==='found'?'#E1F5EE':'#f0f0f0', sFg = e.status==='found'?'#0F6E56':'#888';
+  const sBg = e.status==='found'?'#E4F7F0':'#F1F5F9', sFg = e.status==='found'?'#0F6046':'#64748b';
   const stag = '<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:'+sBg+';color:'+sFg+';">'+e.status+'</span>';
   let fields = '<div class="dp-field"><span style="font-size:11px;font-weight:500;color:#222;">Edge</span> '+stag+'</div>';
   if (EDIT_MODE) {
@@ -992,13 +992,12 @@ def _session_bar_html(phase: str, technique: str, turn_count: int, strategy: str
     steer = ""
     if strategy and strategy != "none":
         if steer_status == "steered":
-            steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
-                     f'background:#FDECEC;color:#B4232A;">steer: {html.escape(strategy)}</span>')
+            steer = (f'<span class="session-chip session-chip-warn">'
+                     f'steer: {html.escape(strategy)}</span>')
         elif steer_status == "fallback":
             # The steering service errored/returned nothing for THIS turn and
             # SteeredRemoteGenerator silently fell back to the plain Ollama reply.
-            steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
-                     f'background:#FFF3CD;color:#8A6100;" '
+            steer = (f'<span class="session-chip session-chip-caution" '
                      f'title="Steering service unavailable this turn — used the plain reply instead.">'
                      f'steer: {html.escape(strategy)} (fallback)</span>')
         else:
@@ -1006,19 +1005,16 @@ def _session_bar_html(phase: str, technique: str, turn_count: int, strategy: str
             # (GENERATOR != steered), so the dropdown selection was never even attempted, not
             # just unavailable for one turn. Distinct from "fallback" so this doesn't read as a
             # transient hiccup — it means steering isn't wired up for this session at all.
-            steer = (f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
-                     f'background:#EEE;color:#888;" '
+            steer = (f'<span class="session-chip session-chip-muted" '
                      f'title="This session\'s generator has no steering support — set GENERATOR=steered '
                      f'and restart the chatbot for the dropdown to take effect.">'
                      f'steer: {html.escape(strategy)} (inactive)</span>')
     return (
-        '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;">'
-        f'<span style="font-size:11px;font-weight:500;padding:3px 10px;border-radius:20px;'
-        f'background:#E6F1FB;color:#185FA5;">{html.escape(phase)}</span>'
-        f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
-        f'border:0.5px solid #d1d5db;color:#666;">{html.escape(technique)}</span>'
+        '<div class="session-strip">'
+        f'<span class="session-chip session-chip-phase">{html.escape(phase)}</span>'
+        f'<span class="session-chip session-chip-technique">{html.escape(technique)}</span>'
         f'{steer}'
-        f'<span style="font-size:11px;color:#aaa;margin-left:auto;">Turn {turn_count}</span>'
+        f'<span class="session-turn">Turn {turn_count}</span>'
         '</div>'
     )
 
@@ -1375,8 +1371,198 @@ def _apply_to_session(handle, session: Session):
 # Injected as a <style> block rather than Blocks(css=...) because Gradio 6 moved
 # that parameter to launch(), which never runs under gr.mount_gradio_app.
 _UI_CSS = """<style>
+:root {
+  --app-bg: #f3f6fa;
+  --panel: #ffffff;
+  --panel-soft: #fbfdff;
+  --border: #dbe3ee;
+  --border-strong: #c8d4e2;
+  --text: #1f2a37;
+  --muted: #64748b;
+  --subtle: #94a3b8;
+  --blue: #2f7dd1;
+  --blue-soft: #e8f1fd;
+  --green: #24a47a;
+  --green-soft: #e4f7f0;
+  --amber-soft: #fff4d6;
+  --danger-soft: #fdebec;
+  --danger: #b4232a;
+}
+body, .gradio-container {
+  background: var(--app-bg) !important;
+  color: var(--text) !important;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+.gradio-container {
+  max-width: none !important;
+  padding: 18px 22px 24px !important;
+}
+.app-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 14px;
+  padding: 0 2px;
+}
+.app-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 750;
+  color: var(--text);
+  letter-spacing: 0;
+}
+.app-subtitle {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.app-badge {
+  align-self: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.tabs {
+  background: transparent !important;
+}
+.tab-nav {
+  border-bottom: 1px solid var(--border) !important;
+  gap: 8px !important;
+  margin-bottom: 14px !important;
+}
+.tab-nav button {
+  border-radius: 8px 8px 0 0 !important;
+  color: var(--muted) !important;
+  font-weight: 650 !important;
+  padding: 10px 14px !important;
+}
+.tab-nav button.selected,
+button[role="tab"].selected {
+  color: var(--blue) !important;
+  border-bottom-color: var(--blue) !important;
+  background: rgba(255,255,255,0.72) !important;
+}
+button[role="tab"] {
+  color: var(--muted) !important;
+  font-weight: 650 !important;
+}
+.workspace-row {
+  gap: 16px !important;
+  align-items: stretch !important;
+}
+.control-panel, .graph-column {
+  min-width: 0 !important;
+}
+.control-panel {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  padding: 14px !important;
+  box-shadow: 0 12px 28px rgba(31,42,55,0.06);
+}
+.graph-column {
+  background: transparent !important;
+}
+.session-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.session-chip-phase { background: var(--blue-soft); color: #174a7c; }
+.session-chip-technique {
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--muted);
+}
+.session-chip-warn { background: var(--danger-soft); color: var(--danger); }
+.session-chip-caution { background: var(--amber-soft); color: #805600; }
+.session-chip-muted { background: #eef2f7; color: var(--muted); }
+.session-turn {
+  margin-left: auto;
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 650;
+}
+#therapy_chat {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  overflow: hidden !important;
+}
 #therapy_chat .icon-button-wrapper { display: none !important; }
+.message, .message-row {
+  border-radius: 8px !important;
+}
+.bubble-wrap .message {
+  box-shadow: none !important;
+}
+textarea, input, select {
+  border-color: var(--border-strong) !important;
+  border-radius: 8px !important;
+}
+textarea:focus, input:focus, select:focus {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgba(47,125,209,0.12) !important;
+}
+button.primary, .primary > button {
+  background: var(--blue) !important;
+  border-color: var(--blue) !important;
+}
+button.secondary {
+  border-color: var(--border-strong) !important;
+  background: #fff !important;
+  color: var(--text) !important;
+}
+.section-title {
+  margin: 2px 0 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+.status-md, .branch-md {
+  color: var(--muted);
+  font-size: 12px;
+}
+.compact-tabs .tab-nav {
+  margin-bottom: 10px !important;
+}
+.compact-tabs .tab-nav button {
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+}
 #graph_sync { display: none !important; }
+iframe {
+  box-shadow: 0 12px 28px rgba(31,42,55,0.06);
+}
+@media (max-width: 900px) {
+  .gradio-container { padding: 14px !important; }
+  .app-header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .workspace-row { gap: 12px !important; }
+  .control-panel { padding: 12px !important; }
+}
 </style>"""
 
 # Installed once on page load: relays the canvas iframe's postMessage into the
@@ -1404,12 +1590,21 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
     session_state = gr.State(None)
     pending_msg = gr.State("")
 
-    with gr.Tabs():
+    gr.HTML(
+        '<div class="app-header">'
+        '<div><h1 class="app-title">CBT Graph Steering</h1>'
+        '<p class="app-subtitle">Live therapy dialogue with an inspectable V4 knowledge graph.</p></div>'
+        '<div class="app-badge">V4_flat ontology</div>'
+        '</div>',
+        padding=False,
+    )
+
+    with gr.Tabs(elem_classes=["main-tabs"]):
         # ── Tab 1: Therapy ───────────────────────────────────────────
         with gr.Tab("Therapy (Part 1)"):
-            with gr.Row(equal_height=False):
+            with gr.Row(equal_height=False, elem_classes=["workspace-row"]):
                 # Left column: chat
-                with gr.Column(scale=2):
+                with gr.Column(scale=2, elem_classes=["control-panel"]):
                     session_bar = gr.HTML(value="")
                     chatbot = gr.Chatbot(
                         height=420,
@@ -1460,7 +1655,7 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                     branch_status = gr.Markdown("")
 
                 # Right column: live graph
-                with gr.Column(scale=3):
+                with gr.Column(scale=3, elem_classes=["graph-column"]):
                     graph_panel = gr.HTML()
 
             therapy_outputs = [chatbot, session_state, session_bar, graph_panel]
@@ -1500,11 +1695,11 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
         with gr.Tab("Query (Part 2)"):
             handle_state = gr.State(None)
 
-            with gr.Row(equal_height=False):
+            with gr.Row(equal_height=False, elem_classes=["workspace-row"]):
                 # Left column: load + summary + query chat
-                with gr.Column(scale=2):
-                    gr.Markdown("### Load a graph")
-                    with gr.Tabs():
+                with gr.Column(scale=2, elem_classes=["control-panel"]):
+                    gr.Markdown('<div class="section-title">Load a graph</div>')
+                    with gr.Tabs(elem_classes=["compact-tabs"]):
                         with gr.Tab("Live session"):
                             live_btn = gr.Button("Load current therapy session")
                         with gr.Tab("Upload JSON"):
@@ -1520,9 +1715,9 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                             neo_user = gr.Textbox(label="User", value="neo4j")
                             neo_pw = gr.Textbox(label="Password", type="password")
                             neo_btn = gr.Button("Connect & load")
-                    summary_md = gr.Markdown("_Load a graph to start._")
+                    summary_md = gr.Markdown("_Load a graph to start._", elem_classes=["status-md"])
 
-                    gr.Markdown("### Ask")
+                    gr.Markdown('<div class="section-title">Ask</div>')
                     query_chat = gr.Chatbot(
                         height=300,
                         show_label=False,
@@ -1537,7 +1732,7 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                         ask_btn = gr.Button("Ask", variant="primary", scale=1)
 
                 # Right column: editable graph
-                with gr.Column(scale=3):
+                with gr.Column(scale=3, elem_classes=["graph-column"]):
                     query_graph_panel = gr.HTML(
                         value=_render_canvas([], [], edit_mode=True)
                     )
