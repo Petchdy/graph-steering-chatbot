@@ -1,0 +1,21 @@
+{
+  "_doc": "Static crisis-referral text appended by the crisis guard in serve_steer.py. The MODEL never writes these lines and never emits a phone number of its own — during testing it produced wrong ones ('988 ... call or text 987', 'Samaritans at 1768' which is not the Singapore line, '988 in my country (they work worldwide)' which is US-only). Anything the model generates that looks like a phone number is stripped by the resource filter and replaced with the line below.",
+
+  "verified": false,
+  "_verified_doc": "MUST be set to true by a human who has checked every number below against the official source for the deployment's country, on the day of deployment. While this is false the guard appends `generic_line` only — no numbers are ever shown. This is deliberate: shipping an unverified crisis number is the exact failure this guard exists to prevent.",
+
+  "generic_line": "If you are in immediate danger or thinking about harming yourself, please contact your local emergency services or a crisis helpline in your country right now — a real person there can stay with you through this.",
+
+  "verified_lines": {
+    "_doc": "Fill in for the deployment locale, then set verified=true. Each entry needs a source URL and the date it was checked. Left EMPTY on purpose — an assistant should not populate crisis numbers from memory.",
+    "example_shape": {
+      "region": "XX",
+      "line": "<organisation> — <number>, <hours>",
+      "source_url": "https://…",
+      "checked_on": "YYYY-MM-DD"
+    },
+    "entries": []
+  },
+
+  "crisis_patterns_note": "Detection lives in steer_runtime.CRISIS_RE. It is intentionally broad — a false positive costs one unsteered reply plus a referral line, a false negative costs a steered reply that answers distress with a personal anecdote."
+}

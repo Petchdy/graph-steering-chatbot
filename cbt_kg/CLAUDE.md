@@ -60,6 +60,7 @@ be set independently.
 | `LOCAL_LLM_MODEL` | any Ollama tag | falls back to `OLLAMA_MODEL` |
 | `LOCAL_LLM_BASE_URL` | URL (`/v1` suffix stripped internally) | `http://localhost:11434/v1` |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | — | `anthropic/claude-sonnet-4-6` |
+| `REFERRAL_GUARD` | `1` \| `0` | `1` — deterministic crisis-referral filter (`guard/`); `0` disables it, reproducing pre-guard behaviour byte-for-byte |
 | `EXTRACT_LANGUAGE` | `English` \| `Thai` | `English` |
 | `EXTRACT_FAST` | `0` \| `1` | `0` — set `1` to collapse Stage 2.5 into Stage 1 for fewer LLM calls (lower fidelity) |
 | `CONSOLIDATE_EVERY` | integer | `6` — Tier B fires every Nth client turn as a detached background task |

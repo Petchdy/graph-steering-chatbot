@@ -194,8 +194,25 @@ async def async_turn(session: Session, user_message: str) -> dict:
     if (session.turn_count % CONSOLIDATE_EVERY) == 0:
         asyncio.create_task(_run_consolidate(session))
 
+    # Referral guard: `reply` is ALREADY sanitized (SafeGenerator cleaned result["response"] before
+    # this function saw it), so history/transcript/graph above are clean with no change here. The
+    # verified footer is attached to the OUTWARD reply only — it must never enter session.history,
+    # because serve_steer.py generates with no_repeat_ngram_size=3 over the whole sequence, so
+    # footer n-grams in an assistant turn would ban the model from producing that phrasing itself,
+    # and it starts imitating and mutating the format. See guard/NOTES.md.
+    guard_info = result.get("guard")
+    outward_reply = reply
+    if guard_info and guard_info.get("needs_footer"):
+        try:
+            from guard.sanitize import footer_text
+            footer = footer_text()
+            if footer:
+                outward_reply = f"{reply}\n\n{footer}" if reply else footer
+        except Exception as exc:  # noqa: BLE001 — a guard bug must never break the turn
+            print(f"[therapy] referral footer unavailable: {type(exc).__name__}: {exc}")
+
     return {
-        "reply": reply,
+        "reply": outward_reply,
         "technique": technique,
         "phase": validated_phase,
         "extraction_mode": extraction_mode,
@@ -205,6 +222,10 @@ async def async_turn(session: Session, user_message: str) -> dict:
         # Only set by SteeredRemoteGenerator ("steered"/"fallback"/"none"); absent for
         # EchoGenerator/LocalLLMGenerator, which don't have a steering concept.
         "steer_status": result.get("steer_status"),
+        # Only set when the referral guard is enabled (REFERRAL_GUARD != 0):
+        # {needs_footer, crisis, removed}. Absent => guard off, and "reply" is byte-identical
+        # to the pre-guard behaviour.
+        "guard": guard_info,
     }
 
 

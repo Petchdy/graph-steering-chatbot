@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo layout
 
-Three independent pieces, run from the **repo root**:
+Four independent pieces, run from the **repo root**:
 
 - **`cbt_kg/`** — the base chatbot (FastAPI + Gradio). See `cbt_kg/CLAUDE.md` for its full
   architecture (V4_flat extraction pipeline, dependency rule, graph stores, query engine, API
@@ -13,12 +13,23 @@ Three independent pieces, run from the **repo root**:
   toward an ESConv emotional-support strategy (Qwen3.5-9B, DiffMean vectors at layer 19). Isolated
   from `cbt_kg/` on purpose. See `steering/HANDOFF.md` (status/handoff) and `steering/NOTES.md`
   (detailed run/restart/troubleshoot + method).
+- **`guard/`** — deterministic (regex, no LLM) crisis-referral filter. `factory.make_generator()`
+  wraps whatever generator the env selected in `guard.SafeGenerator`, so every path is filtered —
+  including `SteeredRemoteGenerator`'s fall-back-to-Ollama reply, which the steering service's own
+  crisis guard cannot see. Any sentence the model produced containing a number/URL/org name is
+  removed (correct ones too — provenance, not accuracy), and the verified footer from
+  `guard/resources.json` is appended to the **outward reply only**, never to `session.history`.
+  `REFERRAL_GUARD=0` disables it (byte-identical to pre-guard behaviour). `resources.json` ships
+  `"verified": true` for the **Japan** deployment: two global helpline finders (URL only) plus the two
+  nationwide JP lines listed by MHLW, each carrying its `source_url` and `checked_on: 2026-07-30`.
+  Re-check every entry against its source and update `checked_on` before deploying to another locale;
+  setting `"verified": false` reverts the footer to a number-free generic line. See `guard/README.md`.
 - **`V4_flat/`** — the original batch pipeline `cbt_kg/ontology.py` was ported from verbatim. It is
   a frozen reference (git-ignored, not a tracked package) — don't modify it to fix `cbt_kg/` bugs;
   port fixes forward into `cbt_kg/ontology.py` instead.
 
-`pyproject.toml` at the root only configures pytest (`testpaths = cbt_kg/tests`, repo root on
-`pythonpath`) — there is no root-level package/build config.
+`pyproject.toml` at the root only configures pytest (`testpaths = cbt_kg/tests, guard/tests`, repo
+root on `pythonpath`) — there is no root-level package/build config.
 
 ## Commands
 

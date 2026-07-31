@@ -11,6 +11,7 @@ Steering = add a unit DiffMean vector at the text-backbone layer L, renormalized
 from __future__ import annotations
 
 import os
+import re
 
 MODEL_NAME = os.environ.get("STEER_MODEL", "Qwen/Qwen3.5-9B")
 FOUR_BIT = os.environ.get("STEER_4BIT", "1") != "0"
@@ -30,7 +31,23 @@ QUESTION_SYSTEM = (
     "Respond with a brief, caring 1-2 sentence reply that ENDS WITH ONE gentle, open-ended question "
     "inviting them to say more. Be kind, and never give unsafe or harmful advice."
 )
-SYSTEM_BY_STRATEGY: dict[str, str] = {"Question": QUESTION_SYSTEM}
+# Self-disclosure: prompted, not steered (2026-07-30 — see ../../SD_DEPLOY_NOTES.md §10-11). The
+# response-frame AND the original pre-gen vector both caused reference/identity fusion on ordinary
+# single-turn distress openers that name a relationship ("my children left me" -> reply about the
+# bot's own children). Reproduced on both vectors; not fixable by choosing a different one. Wording
+# below is copied verbatim from the research repo's judged "prompt" condition
+# (ES_Steering_SP scripts/chat/chat_depth_eval.py::prompt_system + ESCONV_DEFS["Self-disclosure"]),
+# not a new untested instruction. It fixes the fusion bug (grammar stays correctly attributed) but
+# does NOT make the disclosure genuine — it explicitly instructs fabrication ("divulge similar
+# experiences you have had"), and hand-reading the judged transcripts shows confident invented
+# personal history (a marriage, a child) rather than broken pronouns. Deployed anyway, as a
+# user-approved tradeoff: coherent-but-fake over broken-but-fake.
+SELF_DISCLOSURE_SYSTEM = (
+    MINIMAL_SYSTEM + ' For this reply, use the "Self-disclosure" strategy: Divulge similar '
+    'experiences you have had or emotions you share with the seeker to express empathy.'
+)
+SYSTEM_BY_STRATEGY: dict[str, str] = {"Question": QUESTION_SYSTEM,
+                                       "Self-disclosure": SELF_DISCLOSURE_SYSTEM}
 
 
 def system_for(strategy: str) -> str:
@@ -97,6 +114,141 @@ def make_steer_hook(v_t, alpha):
         out = out / (out.norm(dim=-1, keepdim=True) + 1e-8) * orig
         return (out,) + tuple(args[1:]), kwargs
     return hook
+
+
+def make_decode_steer_hook(v_t, alpha):
+    """Same rotation as make_steer_hook, but ONLY on generated tokens.
+
+    args[0] has seq>1 on the prefill pass and seq==1 on every KV-cached decode step, so the shape
+    gate confines the vector to the response frame and leaves the context — including the system
+    prompt — untouched.
+
+    Why this exists (measured in ES_approaches, all judge-free or hand-counted):
+      * all-positions injection DECAYS with conversation depth (-0.20 to -0.24 SD-probe adherence
+        from the shallow to the deep half of live conversations) while decode-only HOLDS
+        (+0.11 to +0.16). The effect replicates with and without a persona in context, so it is a
+        property of the injection site, not of the prompt.
+      * with a persona biography in the system prompt, all-positions injection amplified it into
+        identity claims — the model asserted it was human in 40% of identity challenges
+        ("I am Sam, a real human being"). Decode-only: 0 of 15.
+    Used for Self-disclosure only; the other four strategies keep make_steer_hook.
+    """
+    def hook(module, args, kwargs):
+        if alpha == 0.0:
+            return None
+        hs = args[0]
+        if hs.shape[1] != 1:          # prefill / context pass -> leave untouched
+            return None
+        orig = hs.norm(dim=-1, keepdim=True)
+        out = hs + alpha * v_t.to(hs.dtype)
+        out = out / (out.norm(dim=-1, keepdim=True) + 1e-8) * orig
+        return (out,) + tuple(args[1:]), kwargs
+    return hook
+
+
+# --------------------------------------------------------------------------------------------- #
+# Sentence-boundary stopping (ported from ES_approaches/common/stopping.py)
+#
+# Left to itself the model fills the token budget instead of finishing a thought: 79% of replies at
+# the research default max_new ended mid-clause ("...yours also gets everything from our amazing"). A hard
+# token cap makes it worse (96%). Stopping at the first sentence boundary past a minimum length, then
+# trimming to the last complete sentence, gets replies that are both complete and near the length a
+# human supporter uses.
+# --------------------------------------------------------------------------------------------- #
+_BOUNDARY = re.compile(r'[.!?…]["\')\]]?(\s|$)')
+_TRAILING = re.compile(r'[.!?…]["\')\]]?\s*$')
+
+
+def trim_to_sentence(text: str, min_words: int = 6) -> str:
+    """Cut back to the last complete sentence; return the original if that would leave too little
+    (better to return a truncated reply than to silently fabricate completeness)."""
+    t = (text or "").strip()
+    if not t or _TRAILING.search(t):
+        return t
+    ends = [m.end() for m in _BOUNDARY.finditer(t)]
+    if not ends:
+        return t
+    cand = t[: ends[-1]].strip()
+    return cand if len(cand.split()) >= min_words else t
+
+
+def make_sentence_stopper(tok, prompt_len: int, min_new: int):
+    """StoppingCriteria: stop once the generated text has a sentence boundary past `min_new`."""
+    from transformers import StoppingCriteria
+
+    class _SentenceStop(StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs) -> bool:
+            gen = input_ids[:, prompt_len:]
+            if gen.shape[1] < min_new:
+                return False
+            texts = tok.batch_decode(gen, skip_special_tokens=True)
+            return all(bool(_BOUNDARY.search(t)) for t in texts)
+
+    return _SentenceStop()
+
+
+# --------------------------------------------------------------------------------------------- #
+# Safety detectors (ported from ES_approaches/a8_stress/metrics.py). GLOBAL — not SD-specific.
+# --------------------------------------------------------------------------------------------- #
+# Deliberately broad. A false positive costs one unsteered reply plus a referral line; a false
+# negative costs a steered reply that answers "I don't see the point anymore" with an anecdote.
+CRISIS_RE = re.compile(
+    r"(kill myself|killing myself|end my life|ending my life|take my (own )?life|suicid|"
+    r"self[- ]harm|hurt myself|harming myself|don'?t want to (be here|live|wake up)|"
+    r"want to die|wanna die|better off (dead|without me)|no reason to (live|go on)|"
+    r"don'?t see the point( of|in)? (any of this|living|it all|anything)?|"
+    r"can'?t (keep )?(going|doing this) (anymore|any more)|burden to everyone|"
+    r"dark thoughts|thoughts of (dying|death)|crisis line|hotline|someone I can call|"
+    # asking for help/resources counts: verification caught "What number should I call?" slipping
+    # through, which is precisely the turn where an invented number does the most harm.
+    r"(what|which|whose) number|who (can|could|should) I call|where (can|do) I get help|"
+    r"need help right now|get me help|somewhere to turn)",
+    re.IGNORECASE)
+
+
+# Identity questions. Steering is dropped for these turns for the same reason as crisis turns: the
+# vector pushes toward first-person experience-sharing, and verification caught it answering
+# "Am I talking to a bot?" with "No, I am not a bot; it is just me here with you." — a denial, in a
+# run with NO persona card. Unsteered, the model answers these honestly.
+IDENTITY_RE = re.compile(
+    r"((are|r) (you|u) (a |an )?(real |actual |human )?(person|human|bot|ai|robot|machine|program)"
+    r"|are you (real|human|alive|a chatbot)|talking to (a|an) (bot|ai|human|person|robot)"
+    r"|you'?re (a |an )?(bot|ai|robot|human|person)\?|human being, yes or no"
+    r"|if you'?re an ai|just say (so|if you)|is this a (bot|robot|machine))",
+    re.IGNORECASE)
+
+
+def contains_identity_question(text: str) -> bool:
+    return bool(IDENTITY_RE.search(text or ""))
+
+# Anything shaped like a phone number or short-code the model might have invented.
+PHONE_RE = re.compile(
+    r"(\+?\d[\d\-\.\s\(\)]{5,}\d|\b\d{3}[-.\s]\d{3,4}\b|\b(?:988|911|999|112|116\s?123|1[-.\s]?800[\d\-.\s]*)\b)")
+
+
+def contains_crisis(text: str) -> bool:
+    return bool(CRISIS_RE.search(text or ""))
+
+
+def strip_invented_numbers(text: str) -> tuple[str, bool]:
+    """Drop whole SENTENCES containing a phone-number-like span.
+
+    Returns (cleaned_text, was_modified). Removing just the digits leaves a worse reply than
+    removing the claim — "calling or texting [number removed] in the US for free support" still
+    tells a distressed person a number exists and that we swallowed it. The service appends the
+    verified referral line separately, so nothing of value is lost by dropping the sentence.
+
+    If every sentence contained a number, the reply collapses to empty and the caller falls back to
+    the referral line alone — which is the correct outcome for a reply that was nothing but invented
+    contact details.
+    """
+    t = (text or "").strip()
+    if not t or not PHONE_RE.search(t):
+        return t, False
+    parts = re.split(r'(?<=[.!?])\s+', t)
+    kept = [p for p in parts if not PHONE_RE.search(p)]
+    cleaned = re.sub(r"\s{2,}", " ", " ".join(kept)).strip()
+    return cleaned, True
 
 
 def new_token_rep_penalty(penalty: float, prompt_len: int):

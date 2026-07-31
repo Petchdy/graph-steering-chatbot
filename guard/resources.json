@@ -1,0 +1,63 @@
+{
+  "_doc": "The ONLY source of crisis-referral text the user is ever shown. The MODEL never supplies a number, a URL, or an organisation name: guard/sanitize.py removes the whole sentence around anything referral-shaped that the model generated, and guard-flagged turns get the footer built from THIS file appended by code in therapy.py. Mirrors the convention of steering/artifacts/crisis_resources.json, which does the same job for the steering service's own guard.",
+
+  "verified": true,
+  "_verified_doc": "MUST be set to true by a human who has checked every entry in verified_lines against the official source for this deployment's country, on the day of deployment. While this is false the footer shows `generic_line` only and NO NUMBER IS EVER DISPLAYED. This is deliberate: shipping an unverified crisis number is the exact failure this guard exists to prevent. Do not populate these from memory.",
+  "_verified_status": "Set true on 2026-07-30 for a Japan deployment/presentation. The four entries below are the ones displayed: two global helpline finders (URL only) and the two nationwide JP lines listed by MHLW. Re-check against each entry's source_url before deploying to a different locale or after any significant time has passed, and update checked_on when you do.",
+
+  "canonical_sentence": "Support is available right now, and a trained person on a crisis line in your area can stay with you through this.",
+  "_canonical_doc": "Substituted in place of a removed sentence, so the model's next-turn context still has a coherent referent when the user replies 'okay, I'll call them'. This string DOES enter session.history, so it is deliberately number-free and free-standing: a number here would be banned from the model's own output by no_repeat_ngram_size and would get imitated and mutated in later turns.",
+
+  "footer_header": "If you are in crisis or need someone to talk to right now:",
+  "generic_line": "Please contact your local emergency services or a crisis helpline in your country — a real person there can stay with you through this. If you are in immediate danger, contact emergency services now.",
+
+  "verified_lines": {
+    "_doc": "Fill in for the deployment locale, then set verified=true. Each entry needs a source URL and the date it was checked. Left EMPTY on purpose — an assistant must not populate crisis numbers from memory.",
+    "example_shape": {
+      "region": "XX",
+      "line": "<organisation> — <number>, <hours>",
+      "source_url": "https://…",
+      "checked_on": "YYYY-MM-DD"
+    },
+    "entries": [
+      {
+        "region": "GLOBAL",
+        "line": "Find A Helpline — https://findahelpline.com (free, confidential; verified helplines in 175+ countries, routes to your country; phone, text and chat)",
+        "source_url": "https://findahelpline.com",
+        "checked_on": "2026-07-30"
+      },
+      {
+        "region": "GLOBAL",
+        "line": "Befrienders Worldwide — https://befrienders.org (global network of crisis centres; helpline finder by country; confidential, non-judgmental)",
+        "source_url": "https://befrienders.org",
+        "checked_on": "2026-07-30"
+      },
+      {
+        "region": "JP",
+        "line": "#いのちSOS (Inochi SOS, NPO LIFELINK) — 0120-061-338 (toll-free), 24 hours / 365 days, nationwide",
+        "source_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/hukushi_kaigo/seikatsuhogo/jisatsu/soudan_tel.html",
+        "checked_on": "2026-07-30"
+      },
+      {
+        "region": "JP",
+        "line": "よりそいホットライン (Yorisoi Hotline) — 0120-279-338 (toll-free), 24 hours, foreign-language support available",
+        "source_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/hukushi_kaigo/seikatsuhogo/jisatsu/soudan_tel.html",
+        "checked_on": "2026-07-30"
+      }
+    ]
+  },
+
+  "upstream_lines": [
+    "If you are in immediate danger or thinking about harming yourself, please contact your local emergency services or a crisis helpline in your country right now — a real person there can stay with you through this."
+  ],
+  "_upstream_doc": "Referral text appended by a component UPSTREAM of this guard — currently serve_steer.py's crisis guard, which appends steering/artifacts/crisis_resources.json::generic_line to the reply. Sentences matching these are removed like any other referral, so exactly one footer reaches the user and the upstream line never enters session.history. Keep in sync if that file's generic_line changes; guard/tests/test_sanitize.py pins the two together.",
+
+  "detection": {
+    "_doc": "DETECTION-ONLY reference data, never displayed. Used to tag guard log rows so the research record can separate 'model cited a widely-published number/domain' from 'model apparently invented one'. An error in this block mislabels a log row and nothing else — display comes exclusively from verified_lines above.",
+    "known_number_references": ["988", "911", "999", "112", "116123", "741741", "1-800-273-8255", "1-800-662-4357", "1-800-799-7233", "0120-061-338", "0120-279-338", "0570-064-556", "110", "119"],
+    "known_domain_references": ["988lifeline.org", "findahelpline.com", "samhsa.gov", "thehotline.org", "crisistextline.org", "samaritans.org"]
+  },
+
+  "referral_vocabulary": ["call", "calling", "text", "texting", "dial", "dialing", "hotline", "helpline", "lifeline", "crisis", "reach", "contact", "number", "line", "helpdesk", "emergency"],
+  "referral_nouns": ["Hotline", "Helpline", "Lifeline", "Crisis", "Center", "Centre", "Foundation", "Samaritans"]
+}
