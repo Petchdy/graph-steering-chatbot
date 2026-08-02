@@ -11,14 +11,43 @@
   "alphas": {
     "Question": 0.5,
     "Affirmation and Reassurance": 0.75,
-    "Self-disclosure": 0.5,
+    "Self-disclosure": 0.0,
     "Reflection of feelings": 0.5,
     "Info+Suggest": 0.5
   },
+  "_alpha_note": "Self-disclosure forced to 0.0 on 2026-07-30 and staying there -- see SD_DEPLOY_NOTES.md sections 10-11. alpha==0.0 is a coded no-op in steer_runtime.py:make_steer_hook (hook returns before touching hidden state). Self-disclosure is no longer a steering strategy at all: it now runs on a per-strategy SYSTEM PROMPT (steer_runtime.SELF_DISCLOSURE_SYSTEM) instead of a vector -- see the 'overrides.Self-disclosure' block below, which now carries only length control, no vector fields.",
   "gen": {
     "repetition_penalty": 1.3,
     "no_repeat_ngram_size": 3,
     "note": "judge-picked alphas (rep-control on)",
     "question_prompt_nudge": true
+  },
+  "overrides_DISABLED_2026-07-30": {
+    "_doc": "RETIRED 2026-07-30 — see SD_DEPLOY_NOTES.md §10-11. Found: the response vector, decode-only, causally produces pronoun/identity fusion on ordinary single-turn relational-loss openers ('my children left me' -> reply talks about 'my children', 'my divorce', 'my whole world' as the BOT'S OWN life) at ~90% rate in a 10-message sample (steered), vs 0/5 on the same inputs unsteered. Rolling back to the ORIGINAL pre-gen vector did not fix it either — same fusion, 'our children' instead of 'my children'. Not a vector-choice problem; a steering-toward-self-disclosure-with-no-grounded-self problem. Self-disclosure now runs on a system prompt instead (see the live 'overrides' block below and steer_runtime.SELF_DISCLOSURE_SYSTEM) — this key is kept, renamed not deleted, purely as the historical record of the vector configuration that was tried and retired.",
+    "_rollback": "vector_response.npz IS present in artifacts/vectors/Self-disclosure/, so this block is an executable config-only rollback, not just a record: rename the live 'overrides' out of the way, rename this key back to 'overrides', and set alphas['Self-disclosure'] to 0.5. No code change -- serve_steer.py still honours vector_file/typical_norm/alpha/inject/soft_cap, and make_decode_steer_hook is still in steer_runtime.py. Second rollback option: vector_depth.npz (the original pre-gen vector, all-positions) is tracked here too. Be aware before using either -- SD_DEPLOY_NOTES.md section 10.2 records that the reference/identity fusion bug reproduced on BOTH vectors ('our children' instead of 'my children' on the pre-gen one). These exist so the experiment can be resumed, not so it can be shipped.",
+    "Self-disclosure": {
+      "vector_file": "vector_response.npz",
+      "typical_norm": 43.193,
+      "alpha": 0.5,
+      "inject": "decode",
+      "soft_cap": {
+        "min_new": 28,
+        "max_new": 80
+      },
+      "why": "SD's discriminative signal is absent at the pre-gen position (L19 AUC 0.545, Fisher 0.078) and strong in the response frame (AUC 0.835, Fisher 1.01); the two directions are near-orthogonal (cos 0.109). The shipped pre-gen vector is therefore ~noise for SD, which is why NOTES.md records judge-SD 0.5/4. inject=decode because all-positions injection decays with conversation depth (-0.20 to -0.24 SD-probe adherence shallow->deep vs +0.11 to +0.16 for decode-only) and, with a persona in context, produced human-identity claims in 40% of identity challenges (decode-only: 0%). soft_cap because 79% of replies otherwise end mid-sentence. typical_norm is the response-frame norm, which is what alpha 0.5 was calibrated against."
+    }
+  },
+  "overrides": {
+    "_doc": "Self-disclosure is prompted now, not steered (steer_runtime.SELF_DISCLOSURE_SYSTEM) — see 'overrides_DISABLED_2026-07-30' above for why the vector was retired. alpha stays 0.0 (top-level alphas block) regardless of what's here, so no vector fields are needed; this block only carries length control.",
+    "Self-disclosure": {
+      "soft_cap": { "min_new": 28, "max_new": 80 },
+      "why": "Same length-control fix used elsewhere in this config: sentence-boundary stop past min_new avoids the generic rambling/mid-sentence-ending problem. Not vector-specific — kept for the prompted path too."
+    }
+  },
+  "safety": {
+    "_doc": "Applies to EVERY strategy, not just Self-disclosure: a fabricated crisis number is equally harmful under any vector.",
+    "crisis_guard": true,
+    "resource_filter": true,
+    "why": "Steering suppresses crisis referral (0.39 unsteered -> 0.06 steered) and the model has been observed inventing helpline numbers ('988 ... call or text 987', 'Samaritans at 1768'). On a crisis turn the steering hook is skipped and a static, human-verified line from crisis_resources.json is appended; any model-generated phone-number span is stripped."
   }
 }

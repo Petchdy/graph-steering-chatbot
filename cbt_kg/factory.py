@@ -46,6 +46,20 @@ def make_extractor() -> Extractor:
 
 
 def make_generator() -> Generator:
+    """Build the configured generator, wrapped in the referral guard unless REFERRAL_GUARD=0.
+
+    The guard wraps the OUTERMOST generator on purpose: SteeredRemoteGenerator falls back to an
+    Ollama reply when the steering service errors, and the steering service's own crisis guard
+    cannot see that path. Wrapping here filters every path with one line.
+    """
+    inner = _make_generator_inner()
+    if os.environ.get("REFERRAL_GUARD", "1") != "0":
+        from guard.safe_generator import SafeGenerator   # lazy, like the steering import below
+        return SafeGenerator(inner)
+    return inner
+
+
+def _make_generator_inner() -> Generator:
     kind = os.environ.get("GENERATOR", "local")
     if kind == "openrouter":
         return OpenRouterGenerator(

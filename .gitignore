@@ -18,6 +18,12 @@ chat_bot
 .vscode/
 .idea/
 
+# guard (referral filter) — research record of removals, not source
+guard/logs/
+
+# service runtime output (steering/service_ctl.sh creates this on first start)
+logs/
+
 # other
 DESIGN.md
 cactus_therapist.html
