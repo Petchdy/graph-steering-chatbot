@@ -20,34 +20,66 @@ import gradio as gr
 from . import factory
 from .interfaces import GraphEdge, GraphNode
 from .therapy import (Session, turn, edit_turn, editable_turns, list_branches,
-                      switch_branch, _client_message_at)
+                      switch_branch, apply_graph, _client_message_at)
 
 # ─────────────────────────────────────────────────────────────────────────
 # Color / style constants
 # ─────────────────────────────────────────────────────────────────────────
 
+# The stroke (middle value) is each class's identity colour and is the *original*
+# pre-"new design" palette — restored deliberately, so don't re-hue it. Only the
+# fill and text were re-derived, as a pale tint / dark shade of that same hue, to
+# keep the soft blended look the rest of the canvas uses.
 NODE_COLORS: dict[str, tuple[str, str, str]] = {
     # label: (fill, stroke, text)
-    "Client":              ("#EEF2F7", "#CBD5E1", "#273142"),
-    "Session":             ("#EEF2F7", "#CBD5E1", "#273142"),
-    "Problem":             ("#E8F1FD", "#3B82D6", "#174A7C"),
-    "Goal":                ("#E5F6EE", "#27A36B", "#12613F"),
-    "Intervention":        ("#FFF2D9", "#D98518", "#744407"),
-    "Homework":            ("#FFF7CC", "#C99700", "#604B00"),
-    "CoreBelief":          ("#F1EAFE", "#7C5CC4", "#3F2E75"),
-    "IntermediateBelief":  ("#F8E8F1", "#B54F83", "#6D2348"),
-    "Situation":           ("#EDF4FF", "#6A8FCC", "#243F6B"),
-    "AutomaticThought":    ("#E8F4F2", "#34998B", "#175C55"),
-    "Reaction":            ("#FDEBE7", "#DE6B52", "#7C2E20"),
-    "AdaptiveResponse":    ("#E4F7F0", "#24A47A", "#0F6046"),
-    "Utterance":           ("#F1F5F9", "#94A3B8", "#334155"),
+    "Client":              ("#EFF0F2", "#D1D5DB", "#1F2937"),
+    "Session":             ("#EFF0F2", "#D1D5DB", "#1F2937"),
+    "Problem":             ("#FDECEC", "#EF4444", "#7F1D1D"),
+    "Goal":                ("#E3F7F0", "#10B981", "#065F46"),
+    "Intervention":        ("#EFEAFE", "#8B5CF6", "#4C1D95"),
+    "Homework":            ("#FEF3DC", "#F59E0B", "#78350F"),
+    "CoreBelief":          ("#F7E6EE", "#831843", "#611030"),
+    "IntermediateBelief":  ("#FAE7EF", "#9D174D", "#6B0F35"),
+    "Situation":           ("#FEF8DC", "#FACC15", "#713F12"),
+    "AutomaticThought":    ("#E4F8F0", "#34D399", "#065F46"),
+    "Reaction":            ("#FDEDED", "#F87171", "#7F1D1D"),
+    "AdaptiveResponse":    ("#E6FAF1", "#6EE7B7", "#065F46"),
+    "Utterance":           ("#F1F2F4", "#9CA3AF", "#374151"),
 }
 _MISSING_COLORS = ("#F8FAFC", "#CBD5E1", "#94A3B8")
+
+# Dark-theme counterpart. Same identity hue per class wherever it still reads on a
+# dark ground — only CoreBelief (#831843) and IntermediateBelief (#9D174D) are
+# lightened, because those two are near-black maroons that vanish otherwise. Fill
+# becomes a deep tint of the hue and text a pale one, mirroring the light palette's
+# structure so the two themes feel like one design.
+NODE_COLORS_DARK: dict[str, tuple[str, str, str]] = {
+    # label: (fill, stroke, text)
+    "Client":              ("#242830", "#D1D5DB", "#E5E7EB"),
+    "Session":             ("#242830", "#D1D5DB", "#E5E7EB"),
+    "Problem":             ("#3A1D1D", "#EF4444", "#FCA5A5"),
+    "Goal":                ("#0E2C24", "#10B981", "#6EE7B7"),
+    "Intervention":        ("#262046", "#8B5CF6", "#C4B5FD"),
+    "Homework":            ("#3A2A0C", "#F59E0B", "#FCD34D"),
+    "CoreBelief":          ("#35152A", "#C2417A", "#F0A5C8"),
+    "IntermediateBelief":  ("#38162A", "#D4548A", "#F5AFCB"),
+    "Situation":           ("#3A3410", "#FACC15", "#FEF08A"),
+    "AutomaticThought":    ("#12302A", "#34D399", "#86EFC5"),
+    "Reaction":            ("#3B2020", "#F87171", "#FECACA"),
+    "AdaptiveResponse":    ("#113329", "#6EE7B7", "#A7F3D0"),
+    "Utterance":           ("#24282F", "#9CA3AF", "#D1D5DB"),
+}
+_MISSING_COLORS_DARK = ("#1F232A", "#3F4753", "#6B7280")
 
 _COLOR = {k: v[1] for k, v in NODE_COLORS.items()}    # stroke
 _BADGE_BG = {k: v[0] for k, v in NODE_COLORS.items()}  # fill
 _BADGE_COLOR = {k: v[2] for k, v in NODE_COLORS.items()}  # text
 _COLOR["missing"] = _MISSING_COLORS[1]
+
+_COLOR_D = {k: v[1] for k, v in NODE_COLORS_DARK.items()}
+_BADGE_BG_D = {k: v[0] for k, v in NODE_COLORS_DARK.items()}
+_BADGE_COLOR_D = {k: v[2] for k, v in NODE_COLORS_DARK.items()}
+_COLOR_D["missing"] = _MISSING_COLORS_DARK[1]
 
 _PREDICATES = [
     "triggers", "leadsTo", "stemsFrom", "givesRiseTo",
@@ -208,75 +240,119 @@ _CANVAS_TEMPLATE = '''<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <style>
+/* Both themes are expressed as one variable set; the drawing code reads the
+   matching node palette (see THEME/PALETTE in the script). The iframe cannot see
+   Gradio's .dark class on the parent page, so the theme arrives two ways:
+   prefers-color-scheme as the default, and an explicit html[data-theme] that the
+   parent sets via postMessage — the latter wins, because Gradio's toggle can
+   disagree with the OS. */
+:root {
+  --c-app: #f6f8fb;        --c-panel: #ffffff;      --c-panel-soft: #fbfdff;
+  --c-border: #dbe3ee;     --c-border-soft: #e2e8f0;
+  --c-line: #d5deea;       --c-line-hover: #b8c7d9;
+  --c-text: #273142;       --c-text-strong: #1f2a37;
+  --c-btn-text: #44546a;   --c-btn-hover: #eef4fb;
+  --c-muted: #64748b;      --c-subtle: #94a3b8;     --c-chip: #eef2f7;
+  --c-grid: rgba(148,163,184,0.18);
+  --c-legend-bg: rgba(255,255,255,0.96);
+  --c-shadow: rgba(15,23,42,0.06);
+  --c-danger: #b4232a;   --c-danger-line: #f3b9be;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-app: #12151a;      --c-panel: #181c22;      --c-panel-soft: #1d222a;
+    --c-border: #2a313b;   --c-border-soft: #262d36;
+    --c-line: #333c48;     --c-line-hover: #47525f;
+    --c-text: #e5e9ef;     --c-text-strong: #f3f5f8;
+    --c-btn-text: #c2cad6; --c-btn-hover: #232a33;
+    --c-muted: #94a3b8;    --c-subtle: #6b7787;     --c-chip: #232a33;
+    --c-grid: rgba(148,163,184,0.14);
+    --c-legend-bg: rgba(24,28,34,0.96);
+    --c-shadow: rgba(0,0,0,0.35);
+    --c-danger: #f98a90;   --c-danger-line: #6d2a2f;
+  }
+}
+:root[data-theme="dark"] {
+  --c-app: #12151a;      --c-panel: #181c22;      --c-panel-soft: #1d222a;
+  --c-border: #2a313b;   --c-border-soft: #262d36;
+  --c-line: #333c48;     --c-line-hover: #47525f;
+  --c-text: #e5e9ef;     --c-text-strong: #f3f5f8;
+  --c-btn-text: #c2cad6; --c-btn-hover: #232a33;
+  --c-muted: #94a3b8;    --c-subtle: #6b7787;     --c-chip: #232a33;
+  --c-grid: rgba(148,163,184,0.14);
+  --c-legend-bg: rgba(24,28,34,0.96);
+  --c-shadow: rgba(0,0,0,0.35);
+  --c-danger: #f98a90;   --c-danger-line: #6d2a2f;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: #f6f8fb; }
-.shell { display: flex; flex-direction: column; height: __SHELL_H__px; background: #ffffff; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 8px; }
+body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: var(--c-app); }
+.shell { display: flex; flex-direction: column; height: __SHELL_H__px; background: var(--c-panel); overflow: hidden; border: 1px solid var(--c-border); border-radius: 8px; }
 .graph-header { display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #fbfdff; flex-shrink: 0; }
-.graph-title { font-size: 12px; font-weight: 650; color: #273142; letter-spacing: 0; white-space: nowrap; }
+  gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--c-border-soft); background: var(--c-panel-soft); flex-shrink: 0; }
+.graph-title { font-size: 12px; font-weight: 650; color: var(--c-text); letter-spacing: 0; white-space: nowrap; }
 .graph-actions { display: flex; gap: 6px; align-items: center; }
 .btn-sm { font-size: 11px; font-weight: 600; padding: 5px 9px; border-radius: 6px;
-  border: 1px solid #d5deea; background: #fff; cursor: pointer; color: #44546a; box-shadow: 0 1px 1px rgba(15,23,42,0.03); }
-.btn-sm:hover { background: #eef4fb; border-color: #b8c7d9; color: #1f2a37; }
-.btn-sm.primary { background: #2f7dd1; color: #fff; border-color: #2f7dd1; }
+  border: 1px solid var(--c-line); background: var(--c-panel); cursor: pointer; color: var(--c-btn-text); box-shadow: 0 1px 1px var(--c-shadow); }
+.btn-sm:hover { background: var(--c-btn-hover); border-color: var(--c-line-hover); color: var(--c-text-strong); }
+.btn-sm.primary { background: #2f7dd1; color: var(--c-panel); border-color: #2f7dd1; }
 .btn-sm.primary:hover { background: #2465aa; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #24A47A;
   display: inline-block; margin-right: 5px; vertical-align: middle; animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
-.graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: radial-gradient(circle at 18px 18px, rgba(148,163,184,0.18) 1px, transparent 1px) 0 0/28px 28px, #ffffff; }
+.graph-panel { flex: 1; display: flex; flex-direction: column; position: relative; background: radial-gradient(circle at 18px 18px, var(--c-grid) 1px, transparent 1px) 0 0/28px 28px, var(--c-panel); }
 canvas { position: absolute; top: 0; left: 0; cursor: pointer; }
-.legend { padding: 8px 14px; border-top: 1px solid #e2e8f0;
+.legend { padding: 8px 14px; border-top: 1px solid var(--c-border-soft);
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-  flex-shrink: 0; background: rgba(255,255,255,0.96); margin-top: auto; }
-.leg { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #64748b; white-space: nowrap; }
+  flex-shrink: 0; background: var(--c-legend-bg); margin-top: auto; }
+.leg { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--c-muted); white-space: nowrap; }
 .ld { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .detail-panel { width: 240px; flex-shrink: 0; display: flex; flex-direction: column;
-  border-left: 1px solid #e2e8f0; background: #fbfdff; overflow-y: auto; }
-.dp-header { padding: 11px 14px 9px; border-bottom: 1px solid #e2e8f0;
+  border-left: 1px solid var(--c-border-soft); background: var(--c-panel-soft); overflow-y: auto; }
+.dp-header { padding: 11px 14px 9px; border-bottom: 1px solid var(--c-border-soft);
   display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-.dp-title { font-size: 12px; font-weight: 650; color: #273142; }
-.dp-close { font-size: 15px; color: #94a3b8; cursor: pointer; border: none; background: none; padding: 0; }
-.dp-close:hover { color: #273142; }
-.dp-empty { padding: 28px 14px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; }
+.dp-title { font-size: 12px; font-weight: 650; color: var(--c-text); }
+.dp-close { font-size: 15px; color: var(--c-subtle); cursor: pointer; border: none; background: none; padding: 0; }
+.dp-close:hover { color: var(--c-text); }
+.dp-empty { padding: 28px 14px; text-align: center; color: var(--c-subtle); font-size: 12px; line-height: 1.6; }
 .dp-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
 .dp-label-badge { display: inline-block; font-size: 10px; font-weight: 650;
   padding: 3px 8px; border-radius: 999px; margin-bottom: 4px; }
 .dp-field { display: flex; flex-direction: column; gap: 3px; }
-.dp-field label { font-size: 10px; color: #64748b; font-weight: 650;
+.dp-field label { font-size: 10px; color: var(--c-muted); font-weight: 650;
   text-transform: uppercase; letter-spacing: 0.04em; }
 .dp-field input, .dp-field select, .dp-field textarea {
   font-size: 12px; padding: 6px 8px; border-radius: 6px;
-  border: 1px solid #d5deea; background: #fff; color: #273142;
+  border: 1px solid var(--c-line); background: var(--c-panel); color: var(--c-text);
   width: 100%; font-family: inherit; resize: none; }
 .dp-field textarea { min-height: 52px; }
 .dp-field input:focus, .dp-field select:focus, .dp-field textarea:focus
   { outline: none; border-color: #2f7dd1; box-shadow: 0 0 0 3px rgba(47,125,209,0.12); }
-.dp-actions { padding: 10px 14px; border-top: 1px solid #e2e8f0;
+.dp-actions { padding: 10px 14px; border-top: 1px solid var(--c-border-soft);
   display: flex; gap: 6px; flex-shrink: 0; }
 .dp-actions button { flex: 1; font-size: 11px; padding: 6px; border-radius: 6px;
-  border: 1px solid #d5deea; background: #fff; cursor: pointer; color: #44546a; }
-.dp-actions button.save { background: #2f7dd1; color: #fff; border-color: #2f7dd1; }
-.dp-actions button.del { color: #b4232a; border-color: #f3b9be; }
+  border: 1px solid var(--c-line); background: var(--c-panel); cursor: pointer; color: var(--c-btn-text); }
+.dp-actions button.save { background: #2f7dd1; color: var(--c-panel); border-color: #2f7dd1; }
+.dp-actions button.del { color: var(--c-danger); border-color: var(--c-danger-line); }
 .dp-actions button:hover { filter: brightness(0.92); }
 .create-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(15,23,42,0.35); display: flex; align-items: center;
   justify-content: center; z-index: 100; }
-.modal-box { background: #fff; border-radius: 8px; border: 1px solid #d5deea;
-  padding: 16px; width: 240px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 18px 45px rgba(15,23,42,0.18); }
-.modal-title { font-size: 13px; font-weight: 650; color: #273142; }
+.modal-box { background: var(--c-panel); border-radius: 8px; border: 1px solid var(--c-line);
+  padding: 16px; width: 240px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 18px 45px var(--c-shadow); }
+.modal-title { font-size: 13px; font-weight: 650; color: var(--c-text); }
 .modal-field { display: flex; flex-direction: column; gap: 4px; }
-.modal-field label { font-size: 10px; color: #64748b; font-weight: 650;
+.modal-field label { font-size: 10px; color: var(--c-muted); font-weight: 650;
   text-transform: uppercase; letter-spacing: 0.04em; }
 .modal-field select, .modal-field input, .modal-field textarea {
   font-size: 12px; padding: 6px 8px; border-radius: 6px;
-  border: 1px solid #d5deea; background: #fff; color: #273142;
+  border: 1px solid var(--c-line); background: var(--c-panel); color: var(--c-text);
   width: 100%; font-family: inherit; }
 .modal-field textarea { min-height: 48px; resize: none; }
 .modal-actions { display: flex; gap: 6px; }
 .modal-actions button { flex: 1; font-size: 11px; padding: 6px; border-radius: 6px;
-  border: 1px solid #d5deea; background: #fff; cursor: pointer; color: #44546a; }
-.modal-actions button.confirm { background: #2f7dd1; color: #fff; border-color: #2f7dd1; }
+  border: 1px solid var(--c-line); background: var(--c-panel); cursor: pointer; color: var(--c-btn-text); }
+.modal-actions button.confirm { background: #2f7dd1; color: var(--c-panel); border-color: #2f7dd1; }
 </style>
 </head>
 <body>
@@ -313,9 +389,54 @@ __LEGEND__
 <script>
 (function() {
 const EDIT_MODE = __EDIT_MODE__;
-const COLOR = __COLOR__;
-const BADGE_BG = __BADGE_BG__;
-const BADGE_COLOR = __BADGE_CLR__;
+// Both palettes ship with the document; which one is live follows the theme.
+// The iframe cannot read Gradio's .dark class on the parent, so the theme comes
+// from prefers-color-scheme by default and from an explicit data-theme that the
+// parent postMessages (Gradio's toggle can disagree with the OS).
+const COLOR_L = __COLOR__, BADGE_BG_L = __BADGE_BG__, BADGE_COLOR_L = __BADGE_CLR__;
+const COLOR_D = __COLOR_D__, BADGE_BG_D = __BADGE_BG_D__, BADGE_COLOR_D = __BADGE_CLR_D__;
+// Values the canvas paints itself, which have no CSS rule to inherit from.
+const CHROME_L = {missingFill:'#F5F5F5', missingText:'#9aa0a6', edgeIdle:'#94a3b8',
+                  fallbackStroke:'#aaa', fallbackFill:'#eee', fallbackText:'#1F2937'};
+const CHROME_D = {missingFill:'#1F232A', missingText:'#6B7280', edgeIdle:'#5b6675',
+                  fallbackStroke:'#6b7787', fallbackFill:'#242830', fallbackText:'#e5e9ef'};
+let DARK = false, themePinned = false;
+let COLOR = COLOR_L, BADGE_BG = BADGE_BG_L, BADGE_COLOR = BADGE_COLOR_L, CHROME = CHROME_L;
+
+// The legend is server-rendered with the light palette inlined; re-colour its
+// swatches from whichever palette is live so it cannot contradict the canvas.
+function redrawLegend() {
+  const sw = document.querySelectorAll('.ld[data-label]');
+  for (let i = 0; i < sw.length; i++) {
+    const lb = sw[i].getAttribute('data-label');
+    if (BADGE_BG[lb]) sw[i].style.background = BADGE_BG[lb];
+    if (COLOR[lb]) sw[i].style.border = '1px solid ' + COLOR[lb];
+  }
+}
+
+function applyTheme(dark) {
+  DARK = !!dark;
+  COLOR = DARK ? COLOR_D : COLOR_L;
+  BADGE_BG = DARK ? BADGE_BG_D : BADGE_BG_L;
+  BADGE_COLOR = DARK ? BADGE_COLOR_D : BADGE_COLOR_L;
+  CHROME = DARK ? CHROME_D : CHROME_L;
+  document.documentElement.setAttribute('data-theme', DARK ? 'dark' : 'light');
+}
+const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+applyTheme(mq ? mq.matches : false);
+if (mq && mq.addEventListener) {
+  // Only while the parent has not pinned a theme: an explicit choice outranks the OS.
+  mq.addEventListener('change', function(e) {
+    if (!themePinned) { applyTheme(e.matches); redrawLegend(); draw(); }
+  });
+}
+window.addEventListener('message', function(e) {
+  const d = e.data;
+  if (!d || d.kind !== 'cbt_theme') return;
+  themePinned = true;
+  applyTheme(d.dark);
+  redrawLegend(); draw();
+});
 const NODE_CLASSES = __NODE_CLASSES__;
 const PREDICATES = __PREDICATES__;
 
@@ -342,8 +463,18 @@ const RADIUS_RECT_W = 38;
 const ARROW_CLEARANCE = 8;
 const CURVE = 28;
 const MAX_PER_ROW = 6;
-const SUBROW_GAP = 64;
-const MIN_SEP = 68;
+// Sub-rows must clear a full circle (2*RADIUS_CIRCLE = 56) plus PAD_Y, or the
+// wrapped rows of a dense layer overlap before separation even starts.
+const SUBROW_GAP = 78;
+// Separation is measured between node *boxes*, not centres — a circle is
+// 56x56 and a Problem/Goal rect is 76x44, so a single centre-distance
+// threshold cannot describe both.
+const PAD_X = 16;   // min horizontal gap between two node boxes
+const PAD_Y = 12;   // min vertical gap
+const SEP_PASSES = 14;
+
+function halfW(n) { return RECT_LABELS.has(n.label) ? RADIUS_RECT_W : RADIUS_CIRCLE; }
+function halfH(n) { return RECT_LABELS.has(n.label) ? RADIUS_RECT_H : RADIUS_CIRCLE; }
 
 function applyLayout(W, H) {
   const MARGIN = 48;
@@ -353,7 +484,6 @@ function applyLayout(W, H) {
   const SCALE = Math.max(1, Math.sqrt(nodes.length / 18));
   const VW = W * SCALE, VH = H * SCALE;
   const vM = MARGIN * SCALE;
-  const vMAIN_W = VW - RIGHT_W * SCALE - vM * 2;
 
   const layerGroups = {}, rightGroups = {};
   for (const n of nodes) {
@@ -365,39 +495,97 @@ function applyLayout(W, H) {
     }
   }
 
+  // The right-hand region is sized from what it must hold, not a fixed 160px:
+  // a long session yields more Intervention/Homework nodes than fit in one
+  // column, and the old single column simply stacked the overflow.
+  const rightAll = [];
+  Object.keys(rightGroups).forEach(function(label) {
+    rightGroups[label].forEach(function(n) { rightAll.push(n); });
+  });
+  const cellH = RADIUS_CIRCLE * 2 + PAD_Y;
+  const cellW = RADIUS_CIRCLE * 2 + PAD_X;
+  const rightRowsFit = Math.max(1, Math.floor((VH - vM * 2) / cellH));
+  const rightCols = rightAll.length ? Math.ceil(rightAll.length / rightRowsFit) : 0;
+  // Never let the column grid eat more than a third of the canvas; past that the
+  // main hierarchy is what matters and separation can spill the rest.
+  // The VW/3 cap limits how much *padding* the region takes, but must never
+  // squeeze the grid itself below the width its columns need.
+  const rightW = Math.max(rightCols * cellW, Math.min(RIGHT_W * SCALE, VW / 3));
+  const vMAIN_W = VW - rightW - vM * 2;
+
   const mainLayers = Object.keys(layerGroups).map(Number).sort(function(a,b){return a-b;});
   const totalLayers = mainLayers.length;
-  const nodeBaseY = {};
+  const nodeBaseY = {}, nodeBaseX = {};
+
+  // How many nodes actually fit across, sized off the widest node (a rect) so a
+  // narrow panel wraps sooner instead of packing a row tighter than separation
+  // can ever undo. Caps at MAX_PER_ROW to keep wide panels from going flat.
+  const perRow = Math.max(2, Math.min(
+    MAX_PER_ROW, Math.floor(vMAIN_W / (RADIUS_RECT_W * 2 + PAD_X))));
+
+  // Every sub-row anywhere in the main area is spaced ROW_H apart, counted across
+  // layers rather than per layer. That is what stops a dense layer's wrapped rows
+  // from spilling into its neighbours (the old even split gave each layer the same
+  // band no matter its size), while still spreading rows over the available height
+  // the way that split did.
+  //
+  // ROW_H fills the panel when there is room and falls back to MIN_ROW_H when there
+  // is not, growing the canvas only then. Pinning it at the minimum instead made a
+  // short graph — 7 layers, one node each — a tall thin ribbon that zoomToFit had
+  // to shrink to fit. Rows are fixed (Y_BAND = 0), so MIN_ROW_H needs no drift
+  // allowance and every leftover collision is horizontal, where perRow guarantees
+  // the row fits.
+  const Y_BAND = 0;
+  const MIN_ROW_H = RADIUS_CIRCLE * 2 + PAD_Y;
+  let totalSubRows = 0;
+  mainLayers.forEach(function(l) {
+    totalSubRows += Math.ceil(layerGroups[l].length / perRow);
+  });
+  const ROW_H = totalSubRows > 1
+    ? Math.max(MIN_ROW_H, (VH - vM * 2) / (totalSubRows - 1))
+    : MIN_ROW_H;
+  const needH = Math.max(0, totalSubRows - 1) * ROW_H + vM * 2;
+  const VH2 = Math.max(VH, needH);
 
   // Hierarchical slot assignment — dense layers wrap into sub-rows
-  mainLayers.forEach(function(l, layerIndex) {
+  let yCursor = vM + Math.max(0, (VH2 - needH) / 2);
+  mainLayers.forEach(function(l) {
     const row = layerGroups[l];
-    const subRows = Math.ceil(row.length / MAX_PER_ROW);
-    const layerH = totalLayers > 1 ? (VH - vM * 2) / (totalLayers - 1) : VH / 2;
-    const yBase = vM + layerIndex * layerH;
+    const subRows = Math.ceil(row.length / perRow);
     for (let i = 0; i < row.length; i++) {
-      const sr = Math.floor(i / MAX_PER_ROW);
-      const idxInSr = i % MAX_PER_ROW;
-      const cntInSr = Math.min(MAX_PER_ROW, row.length - sr * MAX_PER_ROW);
+      const sr = Math.floor(i / perRow);
+      const idxInSr = i % perRow;
+      const cntInSr = Math.min(perRow, row.length - sr * perRow);
       const slotW = vMAIN_W / cntInSr;
       row[i].x = vM + slotW * idxInSr + slotW / 2;
-      row[i].y = yBase + (sr - (subRows - 1) / 2) * SUBROW_GAP * SCALE;
+      row[i].y = yCursor + sr * ROW_H;
       nodeBaseY[row[i].id] = row[i].y;
     }
+    // No extra gap between layers: rows already carry full clearance, and the
+    // gap was pure inflation — it stretched the graph without separating anything.
+    yCursor += subRows * ROW_H;
   });
 
-  // Right-side nodes (Intervention, Homework)
-  const rightLabels = Object.keys(rightGroups);
-  rightLabels.forEach(function(label, li) {
-    const group = rightGroups[label];
-    const slotH = rightLabels.length > 0 ? (VH - vM * 2) / rightLabels.length : VH - vM * 2;
-    const slotStart = vM + li * slotH;
-    const itemH = group.length > 1 ? slotH / group.length : slotH;
-    group.forEach(function(n, i) {
-      n.x = VW - RIGHT_W * SCALE / 2;
-      n.y = slotStart + itemH * i + itemH / 2;
+  // Right-side nodes (Intervention, Homework) — column-major grid, filled top to
+  // bottom then wrapping to a new column. rightAll keeps same-label nodes
+  // adjacent, so a label still reads as one block.
+  if (rightAll.length) {
+    const rows = Math.ceil(rightAll.length / Math.max(1, rightCols));
+    const spanH = VH2 - vM * 2;
+    const stepY = rows > 1 ? Math.max(cellH, spanH / (rows - 1)) : 0;
+    const yStart = vM + Math.max(0, (spanH - stepY * (rows - 1)) / 2);
+    const xStart = VW - rightW + cellW / 2;
+    rightAll.forEach(function(n, i) {
+      n.x = xStart + Math.floor(i / rows) * cellW;
+      n.y = yStart + (i % rows) * stepY;
+      // Held exactly here. Columns sit one cell apart and rows one cellH apart —
+      // precisely the minimum separation — so there is no slack to drift into:
+      // any force nudge closes the gap, and the separation pass cannot undo it
+      // (a whole column pinned against the x-clamp collapses onto one x).
+      nodeBaseX[n.id] = n.x;
+      nodeBaseY[n.id] = n.y;
     });
-  });
+  }
 
   // Spring-force refinement (80 iterations, annealed) — stronger repulsion
   for (let iter = 0; iter < 80; iter++) {
@@ -432,28 +620,65 @@ function applyLayout(W, H) {
 
     for (const n of nodes) {
       if (RIGHT_SIDE.has(n.label)) {
-        n.x = Math.max(VW - RIGHT_W * SCALE - 10, Math.min(VW - 30, n.x + force[n.id].x * step));
-        n.y = Math.max(30, Math.min(VH - 30, n.y + force[n.id].y * step));
+        if (nodeBaseX[n.id] !== undefined) { n.x = nodeBaseX[n.id]; n.y = nodeBaseY[n.id]; }
       } else {
-        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : VH / 2;
+        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : VH2 / 2;
         n.x = Math.max(vM + 20, Math.min(vM + vMAIN_W - 20, n.x + force[n.id].x * step));
-        n.y = Math.max(yBase - 25 * SCALE, Math.min(yBase + 25 * SCALE, n.y + force[n.id].y * step));
+        n.y = Math.max(yBase - Y_BAND, Math.min(yBase + Y_BAND, n.y + force[n.id].y * step));
       }
     }
   }
 
-  // MIN_SEP hard-separation relaxation pass
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i], b = nodes[j];
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.hypot(dx, dy) || 1;
-      if (d < MIN_SEP) {
-        const push = (MIN_SEP - d) / 2, ux = dx / d, uy = dy / d;
-        a.x -= ux * push; a.y -= uy * push * 0.5;
-        b.x += ux * push; b.y += uy * push * 0.5;
+  // Hard-separation relaxation — iterated, and box-aware rather than
+  // centre-distance, so wide rects separate as far as they actually are wide.
+  // Resolving a<->b can push a into c, so this repeats until a pass is clean
+  // (SEP_PASSES caps the work on pathological graphs).
+  for (let pass = 0; pass < SEP_PASSES; pass++) {
+    let moved = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const minX = halfW(a) + halfW(b) + PAD_X;
+        const minY = halfH(a) + halfH(b) + PAD_Y;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const ovX = minX - Math.abs(dx);
+        const ovY = minY - Math.abs(dy);
+        if (ovX <= 0 || ovY <= 0) continue;   // boxes already clear
+        moved = true;
+        // Resolve along whichever axis the node is actually free to move on,
+        // which the two regions disagree about: main-area nodes are pinned to a
+        // ~50px layer band but span the full width, so they can only go
+        // sideways. The right-side grid is free on both axes, so there we take
+        // the axis of least penetration — the shortest way out of the overlap.
+        if (RIGHT_SIDE.has(a.label) && RIGHT_SIDE.has(b.label)) {
+          if (ovY <= ovX) {
+            const dir = dy === 0 ? (i % 2 ? 1 : -1) : Math.sign(dy);
+            const s = dir * ovY / 2;
+            a.y -= s; b.y += s;
+          } else {
+            const dir = dx === 0 ? (i % 2 ? 1 : -1) : Math.sign(dx);
+            const s = dir * ovX / 2;
+            a.x -= s; b.x += s;
+          }
+        } else {
+          const dir = dx === 0 ? (i % 2 ? 1 : -1) : Math.sign(dx);
+          const s = dir * ovX / 2;
+          a.x -= s; b.x += s;
+        }
       }
     }
+    // Re-apply the bounds the force phase honoured; the old single pass skipped
+    // this and let nodes escape both the canvas and their own layer.
+    for (const n of nodes) {
+      if (RIGHT_SIDE.has(n.label)) {
+        if (nodeBaseX[n.id] !== undefined) { n.x = nodeBaseX[n.id]; n.y = nodeBaseY[n.id]; }
+      } else {
+        const yBase = nodeBaseY[n.id] !== undefined ? nodeBaseY[n.id] : VH2 / 2;
+        n.x = Math.max(vM + 20, Math.min(vM + vMAIN_W - 20, n.x));
+        n.y = Math.max(yBase - Y_BAND, Math.min(yBase + Y_BAND, n.y));
+      }
+    }
+    if (!moved) break;
   }
 }
 
@@ -463,11 +688,18 @@ const cv = document.getElementById('gc');
 const ctx = cv.getContext('2d');
 let dpr = window.devicePixelRatio || 1;
 let lastNodeCount = 0;
+// Panel size at the last layout. Tracked because a canvas that first laid out
+// at one size must re-flow when that size changes (see resize()).
+let lastW = 0, lastH = 0;
 let W = 1, H = 1;
 
 // ── Viewport state ────────────────────────────────────────────────────────
 let view = { scale: 1, tx: 0, ty: 0 };
 let panning = null;
+// Once the user zooms or pans, the viewport is theirs — auto-fit stops fighting
+// them. Until then the canvas keeps the graph fitted, so a structural edit that
+// changes the layout's extent cannot leave the drawing drifted or half off-view.
+let userAdjusted = false;
 
 function toWorld(sx, sy) {
   return { x: (sx - view.tx) / view.scale, y: (sy - view.ty) / view.scale };
@@ -478,11 +710,17 @@ function zoomToFit(pad) {
   if (!nodes.length) return;
   let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
   for (const n of nodes) {
-    minX=Math.min(minX,n.x); minY=Math.min(minY,n.y);
-    maxX=Math.max(maxX,n.x); maxY=Math.max(maxY,n.y);
+    // Bound the node's drawn extent, not its centre — fitting centre-to-centre
+    // let the outermost nodes hang over the edge by their own radius.
+    const hwN = halfW(n), hhN = halfH(n);
+    minX=Math.min(minX,n.x-hwN); minY=Math.min(minY,n.y-hhN);
+    maxX=Math.max(maxX,n.x+hwN); maxY=Math.max(maxY,n.y+hhN);
   }
   const gw=(maxX-minX)||1, gh=(maxY-minY)||1;
-  view.scale = Math.max(0.2, Math.min(3, Math.min((W-pad*2)/gw, (H-pad*2)/gh)));
+  // Fit shrinks to fit but never magnifies. The old 3x ceiling blew a freshly
+  // loaded graph — a handful of found nodes, tiny spread — up to 168px nodes
+  // with labels to match. Manual ＋ still goes to 3x for a deliberate close-up.
+  view.scale = Math.max(0.2, Math.min(1, Math.min((W-pad*2)/gw, (H-pad*2)/gh)));
   view.tx = (W - gw*view.scale)/2 - minX*view.scale;
   view.ty = (H - gh*view.scale)/2 - minY*view.scale;
   draw();
@@ -498,10 +736,18 @@ function resize() {
   cv.width = w * dpr; cv.height = h * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   W = w; H = h;
-  if (nodes.length > 0 && w > 50 && h > 50 && nodes.length !== lastNodeCount) {
+  // Re-lay-out when the node set changes OR the panel changes size. Size used to
+  // be ignored, so a canvas that first laid out at one width kept coordinates
+  // computed for that width forever — and the two ways that happens are exactly
+  // the reported ones: the iframe renders while its tab is hidden (zero width),
+  // and Apply re-renders the panel while the column is still reflowing. The
+  // result was a graph drawn off-centre with nodes past the edge.
+  const structural = nodes.length !== lastNodeCount;
+  const resized = Math.abs(w - lastW) > 2 || Math.abs(h - lastH) > 2;
+  if (nodes.length > 0 && w > 50 && h > 50 && (structural || resized)) {
     applyLayout(w, h);
-    lastNodeCount = nodes.length;
-    zoomToFit();
+    lastNodeCount = nodes.length; lastW = w; lastH = h;
+    if (!userAdjusted) zoomToFit(); else draw();
   } else {
     draw();
   }
@@ -519,18 +765,21 @@ gActions.innerHTML =
     '<button class="btn-sm" id="btnEdge">+ Edge</button>' +
     '<button class="btn-sm primary" id="btnSave">Save JSON</button>' : '');
 
-document.getElementById('btnFit').addEventListener('click', function() { zoomToFit(); });
+document.getElementById('btnFit').addEventListener('click', function() { userAdjusted = false; zoomToFit(); });
 document.getElementById('btnZoomIn').addEventListener('click', function() {
   const before = toWorld(W/2, H/2);
+  userAdjusted = true;
   view.scale = Math.min(3, view.scale * 1.2);
   view.tx = W/2 - before.x * view.scale; view.ty = H/2 - before.y * view.scale; draw();
 });
 document.getElementById('btnZoomOut').addEventListener('click', function() {
   const before = toWorld(W/2, H/2);
+  userAdjusted = true;
   view.scale = Math.max(0.2, view.scale / 1.2);
   view.tx = W/2 - before.x * view.scale; view.ty = H/2 - before.y * view.scale; draw();
 });
 document.getElementById('btnReset').addEventListener('click', function() {
+  userAdjusted = false;
   if (nodes.length > 0) { applyLayout(W, H); zoomToFit(); } else { draw(); }
 });
 if (EDIT_MODE) {
@@ -597,7 +846,7 @@ function draw() {
     if (!a || !b) continue;
     const sel = selected && selected.type === 'edge' && selected.id === e.id;
     const isFound = e.status === 'found';
-    const col = sel ? '#2f7dd1' : (isFound ? '#24A47A' : '#94a3b8');
+    const col = sel ? '#2f7dd1' : (isFound ? '#24A47A' : CHROME.edgeIdle);
     ctx.save();
     ctx.strokeStyle = col; ctx.lineWidth = sel ? 2.2 : 1.4;
     if (!isFound) ctx.setLineDash([5, 3]);
@@ -630,11 +879,11 @@ function draw() {
     const efrom = edgeMode && edgeFrom === n.id;
     ctx.save();
     const isMissing = n.status === 'missing';
-    const col    = isMissing ? COLOR['missing'] : (COLOR[n.label] || '#aaa');
-    const bgCol  = isMissing ? '#F5F5F5' : (BADGE_BG[n.label] || '#eee');
+    const col    = isMissing ? COLOR['missing'] : (COLOR[n.label] || CHROME.fallbackStroke);
+    const bgCol  = isMissing ? CHROME.missingFill : (BADGE_BG[n.label] || CHROME.fallbackFill);
     const isRect = RECT_LABELS.has(n.label);
     // §UI-1.1 §2.1: use BADGE_COLOR for both text lines, not stroke colour
-    const nodeTextCol = isMissing ? '#9aa0a6' : (BADGE_COLOR[n.label] || '#1F2937');
+    const nodeTextCol = isMissing ? CHROME.missingText : (BADGE_COLOR[n.label] || CHROME.fallbackText);
 
     if (sel || efrom) { ctx.shadowColor = efrom ? '#2f7dd1' : '#24A47A'; ctx.shadowBlur = 10; }
     ctx.fillStyle = bgCol; ctx.strokeStyle = sel ? '#2f7dd1' : col; ctx.lineWidth = sel ? 2.2 : 1.5;
@@ -677,6 +926,7 @@ cv.addEventListener('mousedown', function(e) {
   if (n) { drag = n; dragOff = {x: w.x-n.x, y: w.y-n.y}; selectItem('node', n.id); return; }
   const ed = edgeAt(w.x, w.y);
   if (ed) { selectItem('edge', ed.id); return; }
+  userAdjusted = true;
   panning = { sx: e.clientX, sy: e.clientY, tx0: view.tx, ty0: view.ty };
   clearSelection();
 });
@@ -698,6 +948,7 @@ cv.addEventListener('wheel', function(e) {
   const r = cv.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
   const before = toWorld(mx, my);
+  userAdjusted = true;
   view.scale = Math.max(0.2, Math.min(3, view.scale * (e.deltaY < 0 ? 1.1 : 1/1.1)));
   view.tx = mx - before.x * view.scale; view.ty = my - before.y * view.scale;
   draw();
@@ -787,13 +1038,35 @@ function syncGraph() {
   } catch (err) {}
 }
 
+// Re-run the layout after a change that moves a node between rows. A node's
+// class picks its layer (LAYERS), and a newly created node has no slot at all,
+// so without this the edit lands in the data but the drawing keeps the old
+// position — which reads as the edit not having taken. `resize()` cannot cover
+// it: that only re-lays-out when the node COUNT changes, and re-classing a node
+// leaves the count alone.
+function relayout() {
+  if (nodes.length > 0 && W > 50 && H > 50) {
+    applyLayout(W, H);
+    lastNodeCount = nodes.length;
+    // Re-fit: re-classing a node can add or drop a whole layer row, so the new
+    // layout's extent differs from the one the view was fitted to. Without this
+    // the graph drifts inside the viewport and reads as "the position broke".
+    if (!userAdjusted) { zoomToFit(); return; }
+  }
+  draw();
+}
+
 function saveNode(id) {
   const n = nodes.find(function(x){return x.id===id;});
   if (!n) return;
+  const prevLabel = n.label;
   n.label = document.getElementById('dpClass').value;
   n.status = document.getElementById('dpStatus').value;
   try { n.props = JSON.parse(document.getElementById('dpProps').value||'{}'); } catch(err) {}
-  draw(); syncGraph(); showNodePanel(n);
+  // Only on a class change — re-laying out after a props-only edit would make
+  // the whole graph twitch for no reason.
+  if (n.label !== prevLabel) relayout(); else draw();
+  syncGraph(); showNodePanel(n);
 }
 function saveEdge(id) {
   const e = edges.find(function(x){return x.id===id;});
@@ -807,7 +1080,7 @@ function saveEdge(id) {
 function deleteNode(id) {
   nodes = nodes.filter(function(n){return n.id!==id;});
   edges = edges.filter(function(e){return e.from!==id && e.to!==id;});
-  clearSelection(); draw(); syncGraph();
+  clearSelection(); relayout(); syncGraph();
 }
 function deleteEdge(id) {
   edges = edges.filter(function(e){return e.id!==id;});
@@ -860,10 +1133,12 @@ function confirmNode() {
     Reaction:'content',AdaptiveResponse:'content',Intervention:'description',
     Homework:'taskDescription',Client:'',Session:''};
   const propKey = propKeys[cls]||'content';
+  // No random scatter: relayout() below gives it a proper slot in its layer.
+  // The old random drop landed it anywhere, overlapping whatever was there.
   nodes.push({id:cls.toLowerCase().slice(0,3)+'_'+Date.now(), label:cls,
-    x:60+Math.random()*(W-120), y:60+Math.random()*(H-120),
+    x:0, y:0,
     status:'found', props:propKey?{[propKey]:txt}:{}, evidence:[]});
-  closeModal(); updateTitle(); draw(); syncGraph();
+  closeModal(); updateTitle(); relayout(); syncGraph();
 }
 
 function saveJSON() {
@@ -940,8 +1215,11 @@ def _legend_html(hide_labels: set[str] | None = None,
         fill, stroke, _text = NODE_COLORS[label]
         radius = "border-radius:2px;" if label in _RECT_LEGEND else ""
         out.append(
-            f'<div class="leg"><div class="ld" style="background:{fill};'
-            f'border:1px solid {stroke};{radius}"></div>{label}</div>'
+            # data-label lets redrawLegend() re-colour the swatch from the live
+            # palette; the inline colours are just the light-theme default.
+            f'<div class="leg"><div class="ld" data-label="{label}" '
+            f'style="background:{fill};border:1px solid {stroke};{radius}"></div>'
+            f'{label}</div>'
         )
     return "\n        ".join(out)
 
@@ -965,6 +1243,9 @@ def _render_canvas(
     color_json = json.dumps(_COLOR)
     badge_bg_json = json.dumps(_BADGE_BG)
     badge_clr_json = json.dumps(_BADGE_COLOR)
+    color_d_json = json.dumps(_COLOR_D)
+    badge_bg_d_json = json.dumps(_BADGE_BG_D)
+    badge_clr_d_json = json.dumps(_BADGE_COLOR_D)
     classes_json = json.dumps(_NODE_CLASSES)
     predicates_json = json.dumps(_PREDICATES)
 
@@ -980,6 +1261,9 @@ def _render_canvas(
         .replace("__COLOR__", color_json)
         .replace("__BADGE_BG__", badge_bg_json)
         .replace("__BADGE_CLR__", badge_clr_json)
+        .replace("__COLOR_D__", color_d_json)
+        .replace("__BADGE_BG_D__", badge_bg_d_json)
+        .replace("__BADGE_CLR_D__", badge_clr_d_json)
         .replace("__NODE_CLASSES__", classes_json)
         .replace("__PREDICATES__", predicates_json)
     )
@@ -1236,30 +1520,91 @@ def _message_index_to_turn(chat_history: list, index) -> int:
                if (m.get("role") if isinstance(m, dict) else None) == "user")
 
 
+def _message_text(message) -> str:
+    """Text of a chat message, whichever shape Gradio hands back."""
+    if isinstance(message, dict):
+        message = message.get("content", "")
+    if isinstance(message, dict):
+        message = message.get("text", "")
+    if isinstance(message, (list, tuple)):
+        message = "".join(_message_text(part) for part in message)
+    return str(message or "")
+
+
+def _unchanged_view(session: Session | None, strategy: str, status: str):
+    """The current state, rendered without touching it — the branch_outputs shape."""
+    branch_dd = _branch_controls(session)
+    if session is None:
+        return ([], session, "",
+                _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
+                               height=THERAPY_CANVAS_H),
+                branch_dd, status)
+    snap = session.graph.snapshot()
+    bar, graph_html = _therapy_view(session, strategy,
+                                    snap.get("session_phase", "Rapport"),
+                                    snap.get("active_technique", "Rapport Building"))
+    return (_history_to_chat(session), session, bar, graph_html, branch_dd, status)
+
+
 def _on_edit_message(session: Session, chat_history: list, strategy: str,
                      edit_data: gr.EditData):
-    """Inline pencil-edit of a client message = rewrite that turn."""
+    """Inline pencil-edit of a client message = rewrite that turn.
+
+    Dismissing the inline editor still delivers the original text, so an
+    unchanged message must short-circuit: replaying the turn would spend a whole
+    generate call behind a spinner to arrive back where it started. Returning the
+    current state also closes the editor, since the chatbot is re-rendered from
+    the authoritative history.
+
+    Deliberately NOT a generator. Yielding an interim "rewriting…" frame would be
+    nicer for a real edit, but it makes Gradio mark the event `generator: True`,
+    and the chatbot then shows a streaming/pending state that `show_progress` does
+    not control — putting an indicator on screen for a plain cancel.
+
+    The chatbot is also deliberately NOT among this event's outputs. Gradio draws a
+    pending bubble under the last message whenever the Chatbot is an output of a
+    running event, no matter how fast it returns or what show_progress says — which
+    is the spinner that appeared under the therapist's reply on cancel. The chat is
+    refreshed indirectly instead: a real rewrite writes a new `edit_token`, whose
+    .change re-renders it, while a cancel returns gr.skip() and nothing fires.
+    """
+    new_text = _message_text(edit_data.value)
+    # Gradio reports what the message held before the edit; prefer it over
+    # indexing the history, which can misalign (the transcript opens with the
+    # therapist's INTRO and a failed turn contributes no assistant message).
+    previous = _message_text(getattr(edit_data, "previous_value", None))
+    if not previous:
+        index = edit_data.index
+        if isinstance(index, (tuple, list)):
+            index = index[0]
+        try:
+            previous = _message_text(chat_history[int(index)])
+        except (IndexError, TypeError, ValueError):
+            previous = ""
+    if new_text.strip() == previous.strip():
+        # gr.skip() leaves each component untouched, so the edit_token keeps its
+        # value and its .change never fires — the chat is not re-rendered at all.
+        return (session, gr.skip(), gr.skip(), gr.skip(),
+                "No change — the turn was left as it was.", gr.skip())
     turn_index = _message_index_to_turn(chat_history, edit_data.index)
-    new_text = edit_data.value
-    if isinstance(new_text, dict):
-        new_text = new_text.get("content", "")
-    return _do_rewrite(session, turn_index, str(new_text or ""), strategy)
+    _chat, session, bar, graph_html, branch_dd, status = _do_rewrite(
+        session, turn_index, new_text, strategy)
+    # A fresh token fires edit_token.change, which is what refreshes the chat.
+    return (session, bar, graph_html, branch_dd, status, uuid.uuid4().hex)
+
+
+def _refresh_chat(session: Session | None):
+    """Re-render the transcript. Driven by edit_token so the chatbot is only ever
+    an output of an event that genuinely has something new to show."""
+    return _history_to_chat(session) if session else []
 
 
 def _do_rewrite(session: Session, turn_index, new_message: str,
                 strategy: str = "none"):
     """Replay a past client turn with different words, keeping both versions."""
     if session is None or turn_index in (None, "") or not (new_message or "").strip():
-        branch_dd = _branch_controls(session)
-        snap = session.graph.snapshot() if session else {}
-        bar, graph_html = (_therapy_view(session, strategy,
-                                         snap.get("session_phase", "Rapport"),
-                                         snap.get("active_technique", "Rapport Building"))
-                           if session else ("", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
-                                       height=THERAPY_CANVAS_H)))
-        return (_history_to_chat(session) if session else [], session, bar,
-                graph_html, branch_dd,
-                "Edit a message of yours to try it a different way.")
+        return _unchanged_view(session, strategy,
+                               "Edit a message of yours to try it a different way.")
     if hasattr(session.generator, "set_strategy"):
         session.generator.set_strategy(strategy)
     try:
@@ -1367,7 +1712,9 @@ def _apply_to_session(handle, session: Session):
         return "", _render_canvas([], [], hide_legend_labels=THERAPY_HIDDEN_LABELS,
                                        height=THERAPY_CANVAS_H), "Load a graph first."
     gnodes, gedges, _ = _loaded_graphs[handle]
-    session.graph.replace_all(gnodes, gedges)
+    # Not replace_all: the loaded graph is found-only, so a literal swap would
+    # delete the 'not yet discovered' placeholder scaffold this panel draws.
+    apply_graph(session.graph, gnodes, gedges)
     snap = session.graph.snapshot()
     bar, graph_html = _therapy_view(
         session, "none", snap.get("session_phase", "Rapport"),
@@ -1402,6 +1749,42 @@ _UI_CSS = """<style>
   --amber-soft: #fff4d6;
   --danger-soft: #fdebec;
   --danger: #b4232a;
+  --chip-phase-text: #174a7c;
+  --chip-caution-text: #805600;
+  --chip-muted-bg: #eef2f7;
+  --tab-active-bg: rgba(255,255,255,0.72);
+  /* Tab labels carry their own colours so both themes clear the 4.5:1
+     readable-text threshold; --muted/--blue sat just under it. */
+  --tab-text: #5d6b7d;   --tab-text-active: #2a71bf;
+  --drop-shadow: rgba(31,42,55,0.06);
+  --inset-shadow: rgba(31,42,55,0.04);
+}
+/* Dark counterpart. Gradio marks dark mode with a .dark class on <html>/<body>;
+   this sheet forces its colours with !important, so without an override the app
+   stayed light no matter what the toggle said. */
+html.dark, body.dark, .dark .gradio-container {
+  --app-bg: #0f1216;
+  --panel: #181c22;
+  --panel-soft: #1d222a;
+  --border: #2a313b;
+  --border-strong: #3a434f;
+  --text: #e5e9ef;
+  --muted: #94a3b8;
+  --subtle: #6b7787;
+  --blue: #5da2e8;
+  --blue-soft: #17293c;
+  --green: #34d399;
+  --green-soft: #13312a;
+  --amber-soft: #372c0d;
+  --danger-soft: #3a1c1e;
+  --danger: #f98a90;
+  --chip-phase-text: #a8cff0;
+  --chip-caution-text: #f0c674;
+  --chip-muted-bg: #232a33;
+  --tab-active-bg: rgba(255,255,255,0.06);
+  --tab-text: #b6c2d1;   --tab-text-active: #7dbcff;
+  --drop-shadow: rgba(0,0,0,0.45);
+  --inset-shadow: rgba(0,0,0,0.30);
 }
 body, .gradio-container {
   background: var(--app-bg) !important;
@@ -1422,15 +1805,15 @@ body, .gradio-container {
 }
 .tab-nav button {
   border-radius: 8px 8px 0 0 !important;
-  color: var(--muted) !important;
+  color: var(--tab-text) !important;
   font-weight: 650 !important;
   padding: 10px 14px !important;
 }
 .tab-nav button.selected,
 button[role="tab"].selected {
-  color: var(--blue) !important;
-  border-bottom-color: var(--blue) !important;
-  background: rgba(255,255,255,0.72) !important;
+  color: var(--tab-text-active) !important;
+  border-bottom-color: var(--tab-text-active) !important;
+  background: var(--tab-active-bg) !important;
 }
 button[role="tab"] {
   color: var(--muted) !important;
@@ -1448,7 +1831,7 @@ button[role="tab"] {
   border: 1px solid var(--border) !important;
   border-radius: 8px !important;
   padding: 14px !important;
-  box-shadow: 0 12px 28px rgba(31,42,55,0.06);
+  box-shadow: 0 12px 28px var(--drop-shadow);
 }
 .graph-column {
   background: transparent !important;
@@ -1474,15 +1857,15 @@ button[role="tab"] {
   font-weight: 650;
   white-space: nowrap;
 }
-.session-chip-phase { background: var(--blue-soft); color: #174a7c; }
+.session-chip-phase { background: var(--blue-soft); color: var(--chip-phase-text); }
 .session-chip-technique {
   border: 1px solid var(--border-strong);
-  background: #fff;
+  background: var(--panel);
   color: var(--muted);
 }
 .session-chip-warn { background: var(--danger-soft); color: var(--danger); }
-.session-chip-caution { background: var(--amber-soft); color: #805600; }
-.session-chip-muted { background: #eef2f7; color: var(--muted); }
+.session-chip-caution { background: var(--amber-soft); color: var(--chip-caution-text); }
+.session-chip-muted { background: var(--chip-muted-bg); color: var(--muted); }
 .session-turn {
   margin-left: auto;
   color: var(--subtle);
@@ -1492,10 +1875,16 @@ button[role="tab"] {
 #therapy_chat {
   border: 1px solid var(--border) !important;
   border-radius: 8px !important;
-  background: #fff !important;
+  background: var(--panel) !important;
   overflow: hidden !important;
 }
+/* Hides Gradio's undisableable chatbot-level Trash/"clear" control. The
+   per-message copy+edit group is ALSO an .icon-button-wrapper (Gradio ships
+   `.message-buttons-right .icon-button-wrapper`), so the blanket hide took the
+   edit pencil down with it — restore anything nested under .message-buttons.
+   `flex` is the value Gradio's own .icon-button-wrapper rule uses. */
 #therapy_chat .icon-button-wrapper { display: none !important; }
+#therapy_chat .message-buttons .icon-button-wrapper { display: flex !important; }
 .message, .message-row {
   border-radius: 8px !important;
 }
@@ -1520,16 +1909,16 @@ button.secondary,
 .secondary > button,
 button[class*="secondary"] {
   border: 1px solid var(--border-strong) !important;
-  background: #fff !important;
+  background: var(--panel) !important;
   color: var(--text) !important;
-  box-shadow: 0 1px 1px rgba(31,42,55,0.04) !important;
+  box-shadow: 0 1px 1px var(--inset-shadow) !important;
 }
 button.secondary:hover,
 .secondary > button:hover,
 button[class*="secondary"]:hover {
   border-color: var(--blue) !important;
   background: var(--blue-soft) !important;
-  color: #174a7c !important;
+  color: var(--chip-phase-text) !important;
 }
 
 /* Composer: the textbox sits in a Gradio form wrapper whose padding made Send
@@ -1568,9 +1957,9 @@ button[class*="secondary"]:hover {
   padding: 8px 10px !important;
   font-size: 12px !important;
 }
-#graph_sync { display: none !important; }
+#graph_sync, #edit_token { display: none !important; }
 iframe {
-  box-shadow: 0 12px 28px rgba(31,42,55,0.06);
+  box-shadow: 0 12px 28px var(--drop-shadow);
 }
 @media (max-width: 900px) {
   .gradio-container { padding: 14px !important; }
@@ -1595,6 +1984,24 @@ _SYNC_JS = """
     el.value = JSON.stringify({nodes: d.nodes, edges: d.edges, t: Date.now()});
     el.dispatchEvent(new Event('input', {bubbles: true}));
   });
+
+  // Tell every canvas iframe which theme Gradio is actually in. They are separate
+  // documents, so prefers-color-scheme is all they can see by themselves — and it
+  // is wrong whenever Gradio's toggle (or ?__theme=) disagrees with the OS.
+  const isDark = () => document.documentElement.classList.contains('dark') ||
+                       document.body.classList.contains('dark');
+  const broadcast = () => {
+    const dark = isDark();
+    document.querySelectorAll('iframe').forEach((f) => {
+      try { f.contentWindow.postMessage({kind: 'cbt_theme', dark}, '*'); } catch (err) {}
+    });
+  };
+  // Re-send on toggle, and on any re-render that swaps an iframe in.
+  new MutationObserver(broadcast).observe(document.documentElement,
+    {attributes: true, attributeFilter: ['class']});
+  new MutationObserver(broadcast).observe(document.body, {childList: true, subtree: true});
+  broadcast();
+  setTimeout(broadcast, 300);
 }
 """
 
@@ -1668,6 +2075,15 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
 
             therapy_outputs = [chatbot, session_state, session_bar, graph_panel]
             branch_outputs = therapy_outputs + [branch_dd, branch_status]
+            # Hidden relay: the inline-edit event must not list `chatbot` as an
+            # output (Gradio would draw a pending bubble under the last message on
+            # every trigger, cancel included), so it writes a token here and the
+            # token's .change is what re-renders the chat. Hidden via CSS rather
+            # than visible=False so the component is really rendered.
+            edit_token = gr.Textbox(elem_id="edit_token", value="",
+                                    label="", show_label=False)
+            edit_outputs = [session_state, session_bar, graph_panel,
+                            branch_dd, branch_status, edit_token]
 
             send_btn.click(
                 _add_user, [msg_box, chatbot], [chatbot, msg_box, pending_msg]
@@ -1690,9 +2106,16 @@ with gr.Blocks(title="CBT V4_flat — Therapy + Query", fill_height=True) as dem
                 _branch_controls, [session_state], [branch_dd]
             )
 
+            edit_token.change(_refresh_chat, [session_state], [chatbot])
             chatbot.edit(
                 _on_edit_message, [session_state, chatbot, strategy_dd],
-                branch_outputs,
+                edit_outputs,
+                # Gradio fires `edit` when the inline editor closes — including
+                # on cancel — and paints a progress overlay for any round-trip,
+                # however fast. That put a spinner on screen for pressing ✗ with
+                # nothing changed. The handler reports its own progress in the
+                # status line, so the overlay is pure noise here.
+                show_progress="hidden",
             )
             switch_btn.click(
                 _do_switch_branch, [session_state, branch_dd, strategy_dd],

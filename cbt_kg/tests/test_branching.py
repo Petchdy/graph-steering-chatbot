@@ -161,7 +161,12 @@ def test_inline_edit_rewrites_that_turn():
     data = gr.EditData(None, {"index": 3,
                               "previous_value": "It happened again Tuesday.",
                               "value": "Actually Tuesday went fine."})
-    _chat, s, _bar, _gh, _dd, status = ui._on_edit_message(s, chat, "none", data)
+    # The chatbot is not an output of this event (it would draw a pending bubble
+    # on every trigger, cancel included); the chat is refreshed by edit_token.
+    s, _bar, _gh, _dd, status, token = ui._on_edit_message(s, chat, "none", data)
     assert "Replayed turn 2" in status
+    assert token, "a real rewrite must write a token to trigger the chat refresh"
+    assert any(m["content"] == "Actually Tuesday went fine."
+               for m in ui._refresh_chat(s) if m["role"] == "user")
     assert s.history[-1][0] == "Actually Tuesday went fine."
     assert len(list_branches(s)) == 2

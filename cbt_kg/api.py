@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from . import factory
 from .graph_memory import cytoscape_render
 from .interfaces import GraphEdge, GraphNode
-from .therapy import (Session, async_turn, edit_turn, editable_turns,
+from .therapy import (Session, async_turn, apply_graph, edit_turn, editable_turns,
                       list_branches, switch_branch)
 
 app = FastAPI(title="CBT V4_flat Chatbot")
@@ -308,7 +308,9 @@ def graph_apply(req: ApplyGraphRequest) -> dict:
                        evidence=list(e.get("evidence") or []))
              for e in req.edges]
     g = _sessions[req.session_id].graph
-    g.replace_all(nodes, edges)
+    # Callers post found-only graphs (that is what the canvas saveJSON export
+    # emits), so a literal replace_all would wipe the placeholder scaffold.
+    apply_graph(g, nodes, edges)
     return {"ok": True, "counts": _summarize(nodes, edges),
             "graph_snapshot": g.snapshot()}
 

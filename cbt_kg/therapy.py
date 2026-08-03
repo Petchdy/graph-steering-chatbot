@@ -90,6 +90,53 @@ def restore_session(session: Session, snap: dict) -> None:
     session.graph.import_state(snap["graph_state"])
 
 
+def apply_graph(graph: GraphStore, nodes: list, edges: list) -> None:
+    """Replace `graph` with a corrected one WITHOUT losing the placeholder scaffold.
+
+    `replace_all` is literal — it swaps in exactly what it is given. That is right
+    for `import_state`, whose snapshots carry their own placeholders, but wrong for
+    an externally corrected graph: both sources of one (LiveGraphReader and the
+    canvas `saveJSON` export) deliberately emit `found` items only. Applying that
+    directly deleted every 'not yet discovered' placeholder, so a load-then-apply
+    round trip silently erased the greyed-out scaffold from the therapy panel.
+
+    Placeholders are kept by id, not by label: `upsert_node` flips a placeholder to
+    'found' in place, reusing its id, so an id present in `nodes` means that class's
+    placeholder was legitimately consumed and must not come back.
+
+    Order is preserved as well as membership. The canvas lays nodes out by their
+    position in this list — slot within a layer comes from list index — so simply
+    concatenating the incoming nodes ahead of the kept ones re-sorted the graph and
+    made the drawing jump around after an apply.
+    """
+    old_nodes = graph.nodes()
+    old_edges = graph.edges()
+    node_rank = {n.node_id: i for i, n in enumerate(old_nodes)}
+    edge_rank = {e.edge_id: i for i, e in enumerate(old_edges)}
+
+    incoming_node_ids = {n.node_id for n in nodes}
+    kept_nodes = [n for n in old_nodes
+                  if n.status == "missing" and n.node_id not in incoming_node_ids]
+
+    merged_nodes = list(nodes) + kept_nodes
+    live_ids = {n.node_id for n in merged_nodes}
+    incoming_edge_ids = {e.edge_id for e in edges}
+    # A placeholder edge whose endpoint was dropped by the correction would dangle.
+    kept_edges = [e for e in old_edges
+                  if e.status == "missing" and e.edge_id not in incoming_edge_ids
+                  and e.subject_id in live_ids and e.object_id in live_ids]
+    merged_edges = list(edges) + kept_edges
+
+    # Stable sort: anything already in the graph keeps its position, genuinely new
+    # items keep their incoming order at the end.
+    tail = len(node_rank)
+    merged_nodes.sort(key=lambda n: node_rank.get(n.node_id, tail))
+    tail_e = len(edge_rank)
+    merged_edges.sort(key=lambda e: edge_rank.get(e.edge_id, tail_e))
+
+    graph.replace_all(merged_nodes, merged_edges)
+
+
 # ─────────────────────── Sync wrapper (tests / Gradio) ────────────────────
 
 def turn(session: Session, user_message: str) -> dict:
